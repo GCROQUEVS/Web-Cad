@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebCAD 2D</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="menubar"></div>
+  <div id="toolbar"></div>
+  <div id="main">
+    <div id="canvasWrap">
+      <canvas id="cScene"></canvas>
+      <canvas id="cSel"></canvas>
+      <canvas id="cOver"></canvas>
+      <div class="ucs"><svg width="54" height="54" viewBox="0 0 54 54"><path d="M8 46h36M8 46V10" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M44 46l-6-3v6zM8 10l-3 6h6z" fill="currentColor"/><text x="42" y="40" font-size="10" fill="currentColor">X</text><text x="12" y="14" font-size="10" fill="currentColor">Y</text></svg></div>
+    </div>
+    <div id="side">
+      <div class="sidehead"><span>Propriedades</span><button id="sideToggle" title="Mostrar/ocultar painel">⇥</button></div>
+      <div id="props"></div>
+    </div>
+  </div>
+  <div id="cmd"></div>
+  <div id="status"></div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
