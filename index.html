@@ -23,30 +23,6 @@
   </div>
   <div id="cmd"></div>
   <div id="status"></div>
-  <div id="gate">
-    <form id="gateForm" autocomplete="off">
-      <div class="gate-logo"><span class="logo-mark">◢</span> WebCAD 2D</div>
-      <label for="gatePass">Senha de acesso</label>
-      <input id="gatePass" type="password" autofocus required>
-      <label class="gate-chk"><input id="gateRemember" type="checkbox"> Lembrar neste computador</label>
-      <button type="submit" class="btn primary">Entrar</button>
-      <div id="gateErr" class="gate-err" hidden>Senha incorreta. Tente novamente.</div>
-    </form>
-  </div>
-  <script type="module">
-    const HASH = '19e1ddcda6caac609601d87fea4b16301f2dcbbc49ae8430994e8bb19945bcd3';
-    const KEY = 'webcad.access';
-    const sha = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const open = () => { document.getElementById('gate').remove(); import('./js/main.js'); };
-    let saved = null; try { saved = localStorage.getItem(KEY) || sessionStorage.getItem(KEY); } catch {}
-    if (saved === HASH) open();
-    else document.getElementById('gateForm').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const h = await sha(document.getElementById('gatePass').value);
-      if (h !== HASH) { document.getElementById('gateErr').hidden = false; document.getElementById('gatePass').select(); return; }
-      try { (document.getElementById('gateRemember').checked ? localStorage : sessionStorage).setItem(KEY, h); } catch {}
-      open();
-    });
-  </script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
