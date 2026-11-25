@@ -2,7 +2,7 @@
 import * as G from './geom.js';
 import { T, HATCH_PATTERNS, TYPE_NAMES, makePattern, dimMeasure } from './entities.js';
 import { ACI, aciCss, aciHex, trueCss, nearestAci, colorLabel, LINEWEIGHTS, lwLabel, LINETYPES } from './colors.js';
-import { parseDxf, writeDxf, decodeDxfBytes } from './dxf.js';
+import { parseDxf, writeDxf, decodeDxfBytes, dxfBlob } from './dxf.js';
 import { dwgToDxf, isDwg, dwgVersion } from './dwg.js';
 import { store, download, saveWithPicker } from './storage.js';
 import { plot, exportImage, PAPERS } from './export.js';
@@ -570,8 +570,7 @@ export class UI {
     }
     this.busy('Gravando DXF...'); await new Promise((r) => setTimeout(r, 20));
     try {
-      const txt = writeDxf(doc, { r12 });
-      const blob = new Blob([txt], { type: 'application/dxf' });
+      const blob = dxfBlob(writeDxf(doc, { r12 }));
       const res = await saveWithPicker(blob, name, [{ description: 'DXF', accept: { 'application/dxf': ['.dxf'] } }], as ? null : this.fileHandle);
       if (!res) return;
       if (res !== 'download') { this.fileHandle = res; doc.name = res.name || name; } else doc.name = name;
@@ -618,7 +617,7 @@ export class UI {
     const bgS = h('select', {}, h('option', { value: '#ffffff' }, 'Fundo branco'), h('option', { value: app.settings.bg }, 'Fundo da tela'));
     if (!(await this.modal('Exportar', h('div', {}, this.field('Formato', fmt), this.field('Área', area), this.field('Tamanho (px, para PNG/SVG)', px), this.field('Fundo (PNG/SVG)', bgS))))) return;
     const base = app.doc.name.replace(/\.(dxf|dwg)$/i, '');
-    if (fmt.value.startsWith('dxf')) { download(new Blob([writeDxf(app.doc, { r12: fmt.value === 'dxf12' })], { type: 'application/dxf' }), base + (fmt.value === 'dxf12' ? '_R12' : '') + '.dxf'); return; }
+    if (fmt.value.startsWith('dxf')) { download(dxfBlob(writeDxf(app.doc, { r12: fmt.value === 'dxf12' })), base + (fmt.value === 'dxf12' ? '_R12' : '') + '.dxf'); return; }
     let bb = area.value === 'view' ? app.viewBB() : area.value === 'sel' && app.sel.size ? [...app.sel].reduce((b, e) => G.bbUnion(b, app.doc.bbox(e)), G.bbEmpty()) : app.doc.extents();
     if (!G.bbValid(bb)) { this.addHist('Nada para exportar.', 'err'); return; }
     this.busy('Exportando...'); await new Promise((r) => setTimeout(r, 20));
@@ -641,7 +640,7 @@ export class UI {
     for (const e of list) { const c = cloneEnt(e); d.defaults(c); d._insert(c); }
     const nm = h('input', { type: 'text', value: 'bloco.dxf' });
     if (!(await this.modal('Exportar seleção (WBLOCK)', this.field('Nome do arquivo', nm)))) return;
-    download(new Blob([writeDxf(d)], { type: 'application/dxf' }), nm.value.endsWith('.dxf') ? nm.value : nm.value + '.dxf');
+    download(dxfBlob(writeDxf(d)), nm.value.endsWith('.dxf') ? nm.value : nm.value + '.dxf');
   }
   async plotDialog() {
     const app = this.app;

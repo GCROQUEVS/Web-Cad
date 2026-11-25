@@ -601,7 +601,7 @@ export class App {
         this.submit(v); return;
       }
       if (k === 'ArrowUp' || k === 'ArrowDown') { this.onHistKey && this.onHistKey(k, ev); return; }
-      if (tgt !== this.cmdInput && k.length === 1 && !ev.altKey) { this.cmdInput.focus(); }
+      if (tgt !== this.cmdInput && (k.length === 1 || k === 'Dead') && !ev.altKey) { this.cmdInput.focus(); }
     });
   }
   toggle(name, val) {

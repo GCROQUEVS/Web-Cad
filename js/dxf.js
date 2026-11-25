@@ -9,12 +9,38 @@ export function decodeDxfBytes(buf) {
   const u8 = new Uint8Array(buf);
   const head = new TextDecoder('latin1').decode(u8.subarray(0, 22));
   if (head.startsWith('AutoCAD Binary DXF')) throw new Error('DXF binário não suportado diretamente — será convertido.');
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); } catch { return new TextDecoder('windows-1252').decode(u8); }
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(u8); } catch { /* não é UTF-8 */ }
+  // usa a página de código declarada no cabeçalho ($DWGCODEPAGE)
+  const hdr = new TextDecoder('latin1').decode(u8.subarray(0, Math.min(u8.length, 200000)));
+  const m = hdr.match(/\$DWGCODEPAGE\s*\r?\n\s*3\s*\r?\n\s*([^\r\n]+)/);
+  const cp = m ? m[1].trim().toUpperCase() : '';
+  const map = { ANSI_1250: 'windows-1250', ANSI_1251: 'windows-1251', ANSI_1252: 'windows-1252', ANSI_1253: 'windows-1253', ANSI_1254: 'windows-1254', ANSI_1255: 'windows-1255', ANSI_1256: 'windows-1256', ANSI_1257: 'windows-1257', ANSI_1258: 'windows-1258', ANSI_874: 'windows-874', ANSI_932: 'shift_jis', ANSI_936: 'gbk', ANSI_949: 'euc-kr', ANSI_950: 'big5', DOS866: 'ibm866', ISO8859_1: 'iso-8859-1', ISO8859_2: 'iso-8859-2', ISO8859_15: 'iso-8859-15' };
+  let label = map[cp] || 'windows-1252';
+  try { return new TextDecoder(label).decode(u8); } catch { return new TextDecoder('windows-1252').decode(u8); }
+}
+// \U+XXXX (Unicode) e \M+nXXXX (multibyte) usados pelo AutoCAD em qualquer texto/nome
+function decodeEscapes(t) {
+  if (t.indexOf('\\U+') < 0 && t.indexOf('\\u+') < 0 && t.indexOf('\\M+') < 0) return t;
+  t = t.replace(/\\[Uu]\+([0-9A-Fa-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+  const mb = { 1: 'shift_jis', 2: 'big5', 3: 'euc-kr', 4: 'euc-kr', 5: 'gbk' };
+  return t.replace(/\\M\+([1-5])([0-9A-Fa-f]{4})/g, (m, n, h) => { try { const v = parseInt(h, 16); return new TextDecoder(mb[n]).decode(new Uint8Array([v >> 8, v & 255])); } catch { return m; } });
+}
+// Página de código ANSI_1252 (a declarada no cabeçalho): caracteres fora dela viram \U+XXXX, como o AutoCAD faz
+const CP1252_HI = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008dŽ\u008f\u0090‘’“”•–—˜™š›œ\u009džŸ';
+const CP1252 = new Map(); for (let i = 0; i < 256; i++) CP1252.set(i >= 0x80 && i < 0xa0 ? CP1252_HI[i - 0x80] : String.fromCharCode(i), i);
+function asciiOnly(s) {
+  return s.normalize('NFC').replace(/[^\x00-\x7f]/gu, (ch) => (CP1252.has(ch) ? ch : '\\U+' + (ch.length > 1 ? 'FFFD' : ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0'))));
+}
+// converte o texto DXF gerado em bytes ANSI_1252 para gravar o arquivo
+export function dxfBlob(text) {
+  const b = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) { const c = CP1252.get(text[i]); b[i] = c === undefined ? 63 : c; }
+  return new Blob([b], { type: 'application/dxf' });
 }
 
 // ---------------- PARSER ----------------
 export function parseDxf(text, doc) {
-  const lines = text.split(/\r\n|\r|\n/);
+  const lines = decodeEscapes(text).split(/\r\n|\r|\n/);
   const pairs = [];
   for (let i = 0; i + 1 < lines.length; i += 2) {
     const c = parseInt(lines[i].trim(), 10);
@@ -419,7 +445,7 @@ class W {
 }
 function numStr(v) { if (Number.isInteger(v)) return String(v); let s = v.toPrecision(15); if (s.includes('e')) return v.toFixed(12); if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '.0'); return s; }
 const R2D = 180 / Math.PI;
-function encodeStr(s) { return String(s ?? '').replace(/[\r\n]+/g, '\\P').replace(/[^\x00-\x7f]/g, (ch) => '\\U+' + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')); }
+function encodeStr(s) { return String(s ?? '').replace(/[\r\n]+/g, '\\P'); }
 
 export function writeDxf(doc, opts = {}) {
   if (opts.r12) return writeDxfR12(doc);
@@ -554,7 +580,7 @@ function writeDxfCore(doc, dimMap) {
   w.g(0, 'ENDSEC');
   w.g(0, 'EOF');
   w.out[seedPos + 3] = w.h.toString(16).toUpperCase();
-  return w.out.join('\r\n') + '\r\n';
+  return asciiOnly(w.out.join('\r\n') + '\r\n');
 }
 function colorTags(ctx, e) {
   const w = ctx.w;
@@ -700,7 +726,7 @@ export function prepareDimBlocks(doc) {
 function writeDxfR12(doc) {
   const o = []; const g = (c, v) => o.push(String(c).padStart(3, ' '), typeof v === 'number' ? numStr(v) : String(v));
   const ptw = (c, p) => { g(c, p.x); g(c + 10, p.y); g(c + 20, 0); };
-  g(0, 'SECTION'); g(2, 'HEADER'); g(9, '$ACADVER'); g(1, 'AC1009'); g(9, '$LTSCALE'); g(40, doc.header.ltscale || 1); g(0, 'ENDSEC');
+  g(0, 'SECTION'); g(2, 'HEADER'); g(9, '$ACADVER'); g(1, 'AC1009'); g(9, '$DWGCODEPAGE'); g(3, 'ANSI_1252'); g(9, '$LTSCALE'); g(40, doc.header.ltscale || 1); g(0, 'ENDSEC');
   g(0, 'SECTION'); g(2, 'TABLES');
   g(0, 'TABLE'); g(2, 'LTYPE'); g(70, doc.ltypes.size);
   for (const l of doc.ltypes.values()) { g(0, 'LTYPE'); g(2, l.name); g(70, 0); g(3, l.desc || ''); g(72, 65); g(73, l.pat.length); g(40, l.pat.reduce((a, v) => a + Math.abs(v), 0)); for (const v of l.pat) g(49, v); }
@@ -735,6 +761,6 @@ function writeDxfR12(doc) {
   for (const b of doc.blocks.values()) { if (b.name.startsWith('*')) continue; g(0, 'BLOCK'); g(8, '0'); g(2, b.name); g(70, 0); ptw(10, b.base); g(3, b.name); b.ents.forEach(emit); g(0, 'ENDBLK'); g(8, '0'); }
   g(0, 'ENDSEC');
   g(0, 'SECTION'); g(2, 'ENTITIES'); for (const e of doc.ents.values()) emit(e); g(0, 'ENDSEC'); g(0, 'EOF');
-  return o.join('\r\n') + '\r\n';
+  return asciiOnly(o.join('\r\n') + '\r\n');
 }
 export { isSimilar, mtextLayout };
