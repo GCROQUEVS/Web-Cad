@@ -9,6 +9,8 @@ import { plot, exportImage, PAPERS } from './export.js';
 import { Doc } from './doc.js';
 import { cloneEnt } from './entities.js';
 import { OSNAP_KINDS } from './app.js';
+import { buildChrome, renderDocTabs, LayerPalette, icon, popupMenu } from './ribbon.js';
+import { setFont } from './entities.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const h = (tag, attrs = {}, ...kids) => {
@@ -21,29 +23,69 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 
-// ---------- ícones ----------
-const I = {
-  new: 'M6 3h8l4 4v14H6z M14 3v4h4', open: 'M3 7h6l2 2h10v10H3z', save: 'M5 3h12l3 3v15H5z M8 3v6h8V3 M8 14h8v7H8z', undo: 'M9 7L4 12l5 5 M4 12h10a6 6 0 0 1 0 12', redo: 'M15 7l5 5-5 5 M20 12H10a6 6 0 0 0 0 12',
-  plot: 'M7 9V3h10v6 M5 9h14v8H5z M7 14h10v7H7z',
-  line: 'M4 20L20 4 M4 20h0 M20 4h0', pline: 'M3 18l6-10 6 6 6-10', circle: 'M12 4a8 8 0 1 0 0.01 0 M12 12h0', arc: 'M4 18a10 10 0 0 1 16 0', rect: 'M4 6h16v12H4z', polygon: 'M12 3l8 6-3 10H7L4 9z',
-  ellipse: 'M3 12a9 5 0 1 0 18 0a9 5 0 1 0-18 0', spline: 'M3 17c4-12 8 8 12-2s4-6 6-8', hatch: 'M4 4h16v16H4z M4 12l8-8 M4 20L20 4 M12 20l8-8', text: 'M5 5h14 M12 5v14 M9 19h6', mtext: 'M4 5h16 M4 10h16 M4 15h10 M4 20h12',
-  point: 'M12 12m-1.5 0a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0 M6 12h3 M15 12h3 M12 6v3 M12 15v3', xline: 'M2 18L22 6 M12 12h0',
-  move: 'M12 3v18 M3 12h18 M12 3l-3 3 M12 3l3 3 M12 21l-3-3 M12 21l3-3 M3 12l3-3 M3 12l3 3 M21 12l-3-3 M21 12l-3 3', copy: 'M8 8h11v11H8z M5 16V5h11', rotate: 'M20 12a8 8 0 1 1-3-6.3 M20 4v5h-5', scale: 'M4 20h7v-7H4z M11 13L20 4 M14 4h6v6',
-  mirror: 'M12 3v18 M9 6L4 18h5z M15 6l5 12h-5z', offset: 'M4 16C8 8 16 8 20 16 M4 20C8 12 16 12 20 20', trim: 'M4 4l16 16 M4 20L12 12 M16 8l4-4', extend: 'M3 12h12 M20 4v16 M13 9l3 3-3 3', fillet: 'M4 4v8a8 8 0 0 0 8 8h8', chamfer: 'M4 4v10l6 6h10',
-  array: 'M4 4h5v5H4z M15 4h5v5h-5z M4 15h5v5H4z M15 15h5v5h-5z', erase: 'M5 7h14 M9 7V4h6v3 M7 7l1 13h8l1-13', explode: 'M12 2v5 M12 17v5 M2 12h5 M17 12h5 M5 5l3 3 M16 16l3 3 M5 19l3-3 M16 8l3-3', stretch: 'M3 8h8v8H3z M11 8l9 0 M11 16h9 M20 8v8', break: 'M3 12h7 M14 12h7 M10 8l4 8', join: 'M3 12h7 M14 12h7 M10 12h4', matchprop: 'M14 4l6 6-8 8-6-6z M6 12l-3 9 9-3',
-  dimlin: 'M4 6v12 M20 6v12 M4 12h16 M4 12l3-2 M4 12l3 2 M20 12l-3-2 M20 12l-3 2', dimali: 'M3 17L15 5 M7 21L19 9 M5 19L17 7', dimrad: 'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0 M12 12l6-5', dimdia: 'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0 M6 17L18 7', dimang: 'M4 20h16 M4 20L16 6 M12 20a8 8 0 0 0-2-6', leader: 'M4 20l8-8h8 M4 20l1-4 M4 20l4-1',
-  layers: 'M12 3l9 5-9 5-9-5z M3 13l9 5 9-5 M3 17l9 5 9-5', block: 'M4 4h7v7H4z M13 13h7v7h-7z M11 7h6v6', insert: 'M12 3v12 M7 10l5 5 5-5 M4 21h16', zoomext: 'M3 9V3h6 M21 9V3h-6 M3 15v6h6 M21 15v6h-6', zoomwin: 'M10 10m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0 M15 15l6 6', pan: 'M12 3v18 M3 12h18',
-  props: 'M4 6h16 M4 12h16 M4 18h16 M8 4v4 M16 10v4 M10 16v4', dist: 'M3 17L17 3l4 4L7 21z M7 13l2 2 M10 10l2 2 M13 7l2 2', area: 'M4 4l16 3-4 13L6 17z', list: 'M8 6h12 M8 12h12 M8 18h12 M4 6h0 M4 12h0 M4 18h0', help: 'M9 9a3 3 0 1 1 3 3v3 M12 19h0',
-  boundary: 'M4 4h16v16H4z M8 8h8v8H8z',
-};
-const icon = (k) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="${I[k] || ''}"/></svg>`;
-
 export class UI {
-  constructor(app) { this.app = app; this.histIdx = -1; this.cmdHist = []; this.fileHandle = null; }
+  constructor(app) { this.app = app; this.histIdx = -1; this.cmdHist = []; }
+  get fileHandle() { return this.docs && this.docs[this.curDoc] ? this.docs[this.curDoc].handle : null; }
+  set fileHandle(v) { if (this.docs && this.docs[this.curDoc]) this.docs[this.curDoc].handle = v; }
+  // ---------- vários desenhos (abas) ----------
+  saveState() { const d = this.docs[this.curDoc]; if (d) d.state = this.app.viewState(); }
+  switchTo(i) {
+    this.showStart(false);
+    if (i === this.curDoc && this.docs[i].doc === this.app.doc) return;
+    this.saveState(); this.curDoc = i; const d = this.docs[i];
+    this.app.switchDoc(d.doc, d.state); setFont(d.doc.header.font || 'Arial');
+    this.refreshToolbar(); this.layerPalette.render(); this._tabsKey = null; this.updateTitle(); this.refreshStatus();
+    if (!d.state) this.app.zoomExtents();
+  }
+  newTab(doc) { this.saveState(); this.docs.push({ doc, state: null, handle: null }); this.switchTo(this.docs.length - 1); }
+  // devolve um documento para receber um arquivo aberto (reaproveita a aba se estiver vazia)
+  targetDoc() {
+    const cur = this.app.doc;
+    if (!this.startOpen && cur.ents.size === 0 && !cur.dirty && cur.blocks.size === 0 && !cur.blockEdit) return cur;
+    const d = new Doc(); this.newTab(d); return d;
+  }
+  async closeDoc(i) {
+    const d = this.docs[i];
+    if (d.doc.dirty) { this.switchTo(i); if (!(await this.confirmDiscard())) return; }
+    this.docs.splice(i, 1);
+    if (!this.docs.length) { const nd = new Doc(); nd.name = 'Desenho1.dxf'; this.docs.push({ doc: nd, state: null, handle: null }); }
+    this.curDoc = Math.min(this.curDoc >= i ? Math.max(0, this.curDoc - 1) : this.curDoc, this.docs.length - 1);
+    const t = this.docs[this.curDoc]; this.app.switchDoc(t.doc, t.state); setFont(t.doc.header.font || 'Arial');
+    this.refreshToolbar(); this._tabsKey = null; this.updateTitle(); this.layerPalette.render();
+  }
+  buildStart() {
+    const el = h('div', { id: 'startPage', hidden: true });
+    $('#canvasWrap').append(el); this.startEl = el;
+  }
+  async showStart(on) {
+    this.startOpen = on; this.startEl.hidden = !on; this._tabsKey = null; this.updateTitle();
+    if (!on) return;
+    const el = this.startEl; el.innerHTML = '';
+    const recent = (await store.list().catch(() => [])).filter((x) => x.name !== '__autosave__').sort((a, b) => b.time - a.time).slice(0, 12);
+    const card = (ic, label, act) => h('button', { class: 'sp-btn', onclick: act }, h('span', { html: icon(ic, 28) }), h('span', {}, label));
+    el.append(h('div', { class: 'sp-inner' },
+      h('div', { class: 'sp-col' }, h('div', { class: 'sp-brand' }, h('span', { class: 'app-mark big' }, 'W'), h('span', {}, 'WebCAD 2D')),
+        card('new', 'Novo desenho', () => { this.showStart(false); this.app.runImmediate('NEW'); }), card('open', 'Abrir arquivos (DWG/DXF)...', () => { this.showStart(false); this.app.runImmediate('OPEN'); }), card('browser', 'Abrir do navegador...', () => { this.showStart(false); this.openFromBrowser(); }), card('regen', 'Recuperar autosalvamento', () => { this.showStart(false); this.recover(); })),
+      h('div', { class: 'sp-col wide' }, h('h3', {}, 'Desenhos abertos'), ...this.docs.map((d, i) => h('button', { class: 'sp-row', onclick: () => this.switchTo(i) }, h('span', { html: icon('new', 18) }), h('span', {}, d.doc.name + (d.doc.dirty ? ' *' : '')), h('span', { class: 'sp-meta' }, `${d.doc.ents.size} objetos`))),
+        h('h3', {}, 'Salvos no navegador'), ...(recent.length ? recent.map((r) => h('button', { class: 'sp-row', onclick: async () => { const rec = await store.get(r.name); const doc = this.targetDocForStart(); parseDxf(rec.data, doc); doc.name = rec.name; setFont(doc.header.font || 'Arial'); this.showStart(false); this.app.zoomExtents(); doc.version++; this.refreshToolbar(); } }, h('span', { html: icon('browser', 18) }), h('span', {}, r.name), h('span', { class: 'sp-meta' }, new Date(r.time).toLocaleString()))) : [h('p', { class: 'note' }, 'Nenhum desenho salvo no navegador ainda.')]),
+        h('p', { class: 'note' }, 'Dica: arraste um arquivo DWG ou DXF para a área de desenho para abri-lo.'))));
+  }
+  targetDocForStart() { this.startOpen = false; this.startEl.hidden = true; return this.targetDoc(); }
+  toggleLayerPalette() { this.layerPalette.toggle(); }
+  showBlockBar(name) {
+    let bar = $('#blockBar');
+    if (!name) { if (bar) bar.remove(); document.body.classList.remove('block-editing'); return; }
+    if (!bar) { bar = h('div', { id: 'blockBar' }); $('#canvasWrap').append(bar); }
+    bar.innerHTML = ''; document.body.classList.add('block-editing');
+    bar.append(h('span', { html: icon('bedit', 18) }), h('b', {}, 'Editor de bloco: '), h('span', {}, name), h('button', { class: 'btn primary', onclick: () => this.app.runWith('BCLOSE', 'Sim') }, 'Salvar e fechar'), h('button', { class: 'btn', onclick: () => this.app.runWith('BCLOSE', 'Não') }, 'Descartar'));
+  }
   init() {
     const app = this.app;
     app.cur = { color: 256, tc: null, ltype: 'BYLAYER', lw: -1 };
-    this.buildMenu(); this.buildToolbar(); this.buildStatus(); this.buildCmd(); this.buildProps();
+    this.docs = [{ doc: app.doc, state: null, handle: null }]; this.curDoc = 0; this.startOpen = false;
+    buildChrome(this); this.buildCmd(); this.buildProps();
+    this.layerPalette = new LayerPalette(this);
+    this.buildStart(); renderDocTabs(this);
     app.onMsg = (t, c) => this.addHist(t, c);
     app.onEcho = (t) => { const last = this.histEl.lastElementChild; if (last && last.classList.contains('prompt')) last.append(h('span', { class: 'echo' }, ' ' + t)); };
     app.echoCmd = (n) => { this.addHist('Comando: ' + n, 'cmd'); if (this.cmdHist[this.cmdHist.length - 1] !== n) this.cmdHist.push(n); this.histIdx = -1; };
@@ -51,11 +93,15 @@ export class UI {
     app.onCursor = (p) => { this.coordEl.textContent = `${G.fmt(p.x, 4)}, ${G.fmt(p.y, 4)}, 0`; };
     app.onSettings = () => this.refreshStatus();
     app.onSelChange = () => this.refreshProps();
-    app.onDocChange = () => { this.refreshProps(); this.refreshLayerCombo(); this.updateTitle(); this.infoEl.textContent = `${app.doc.ents.size} objetos`; };
+    app.onDocChange = () => {
+      this.refreshProps(); this.refreshLayerCombo(); this.updateTitle(); this.infoEl.textContent = `${app.doc.ents.size} objetos`; this.refreshStatus();
+      if (!this._lpT) this._lpT = setTimeout(() => { this._lpT = null; this.layerPalette.render(); }, 120);
+    };
     app.onEditText = (e) => this.editText(e);
     app.onShowProps = () => this.showProps();
     app.onContextMenu = (sp) => this.contextMenu(sp);
     app.onToggleHist = () => this.toggleHist();
+    app.onToggleCmd = () => this.toggleCmdLine();
     app.onHistKey = (k, ev) => this.histKey(k, ev);
     app.onInputChange = () => this.updateAuto();
     this.bindDrop();
@@ -64,60 +110,10 @@ export class UI {
     window.addEventListener('beforeunload', (ev) => { if (app.doc.dirty) { this.autosave(); ev.preventDefault(); ev.returnValue = ''; } });
     setInterval(() => { this.perfEl.textContent = app.lastRenderMs != null ? `${app.lastRenderMs.toFixed(1)} ms` : ''; }, 500);
   }
-  // ---------- menu ----------
-  buildMenu() {
-    const R = (c) => () => this.app.run(c);
-    const menus = [
-      ['Arquivo', [['Novo', 'NEW', 'Ctrl+N'], ['Abrir DWG/DXF...', 'OPEN', 'Ctrl+O'], ['Abrir do navegador...', () => this.openFromBrowser()], '-', ['Salvar', 'QSAVE', 'Ctrl+S'], ['Salvar como...', 'SAVEAS', 'Ctrl+Shift+S'], ['Salvar no navegador', () => this.saveToBrowser()], '-', ['Exportar...', 'EXPORT'], ['Plotar / Imprimir PDF...', 'PLOT', 'Ctrl+P'], '-', ['Recuperar autosalvamento', () => this.recover()]]],
-      ['Editar', [['Desfazer', 'U', 'Ctrl+Z'], ['Refazer', 'REDO', 'Ctrl+Y'], '-', ['Recortar', 'CUTCLIP', 'Ctrl+X'], ['Copiar', 'COPYCLIP', 'Ctrl+C'], ['Colar', 'PASTECLIP', 'Ctrl+V'], '-', ['Selecionar tudo', 'SELECTALL', 'Ctrl+A'], ['Apagar', 'ERASE', 'Del'], ['Limpar (Purge)', 'PURGE']]],
-      ['Exibir', [['Zoom extensão', 'ZE', 'Duplo clique roda'], ['Zoom janela', 'ZOOM'], ['Zoom anterior', 'ZP'], ['Pan', 'PAN'], ['Regenerar', 'REGEN'], '-', ['Grade (F7)', () => this.app.toggle('grid')], ['Espessura de linha', () => this.app.toggle('lwt')], ['Propriedades', 'PROPERTIES'], ['Histórico de comandos (F2)', () => this.toggleHist()]]],
-      ['Desenhar', [['Linha', 'LINE', 'L'], ['Polilinha', 'PLINE', 'PL'], ['Círculo', 'CIRCLE', 'C'], ['Arco', 'ARC', 'A'], ['Retângulo', 'RECTANG', 'REC'], ['Polígono', 'POLYGON', 'POL'], ['Elipse', 'ELLIPSE', 'EL'], ['Spline', 'SPLINE', 'SPL'], ['Ponto', 'POINT', 'PO'], ['Linha de construção', 'XLINE', 'XL'], ['Raio', 'RAY'], ['Rosca', 'DONUT', 'DO'], ['Nuvem de revisão', 'REVCLOUD'], '-', ['Hachura', 'HATCH', 'H'], ['Contorno', 'BOUNDARY', 'BO'], '-', ['Texto', 'TEXT', 'DT'], ['Texto múltiplo', 'MTEXT', 'MT'], '-', ['Criar bloco', 'BLOCK', 'B'], ['Inserir bloco', 'INSERT', 'I'], ['Definir atributo', 'ATTDEF', 'ATT']]],
-      ['Modificar', [['Mover', 'MOVE', 'M'], ['Copiar', 'COPY', 'CO'], ['Rotacionar', 'ROTATE', 'RO'], ['Escala', 'SCALE', 'SC'], ['Espelhar', 'MIRROR', 'MI'], ['Deslocamento (Offset)', 'OFFSET', 'O'], ['Matriz', 'ARRAY', 'AR'], '-', ['Aparar', 'TRIM', 'TR'], ['Estender', 'EXTEND', 'EX'], ['Concordar (Fillet)', 'FILLET', 'F'], ['Chanfrar', 'CHAMFER', 'CHA'], ['Quebrar', 'BREAK', 'BR'], ['Quebrar no ponto', 'BREAKATPOINT'], ['Unir', 'JOIN', 'J'], ['Esticar', 'STRETCH', 'S'], ['Alongar', 'LENGTHEN', 'LEN'], ['Alinhar', 'ALIGN', 'AL'], '-', ['Explodir', 'EXPLODE', 'X'], ['Editar polilinha', 'PEDIT', 'PE'], ['Editar texto', 'TEXTEDIT', 'ED'], ['Copiar propriedades', 'MATCHPROP', 'MA'], ['Ordem de desenho', 'DRAWORDER', 'DR'], ['Dividir', 'DIVIDE', 'DIV'], ['Medir', 'MEASURE', 'ME']]],
-      ['Cotas', [['Linear', 'DIMLINEAR', 'DLI'], ['Alinhada', 'DIMALIGNED', 'DAL'], ['Raio', 'DIMRADIUS', 'DRA'], ['Diâmetro', 'DIMDIAMETER', 'DDI'], ['Angular', 'DIMANGULAR', 'DAN'], ['Contínua', 'DIMCONTINUE', 'DCO'], ['Linha de base', 'DIMBASELINE', 'DBA'], ['Chamada', 'QLEADER', 'LE'], '-', ['Estilo de cota...', 'DIMSTYLE', 'D']]],
-      ['Ferramentas', [['Camadas...', 'LAYER', 'LA'], ['Tipos de linha...', 'LINETYPE', 'LT'], ['Escala de tipo de linha', 'LTSCALE', 'LTS'], ['Configurações de desenho...', 'OSNAP', 'OS'], ['Unidades...', 'UNITS', 'UN'], ['Opções...', 'OPTIONS', 'OP'], '-', ['Distância', 'DIST', 'DI'], ['Área', 'AREA', 'AA'], ['Coordenada (ID)', 'ID'], ['Listar', 'LIST', 'LI'], ['Contar objetos', 'COUNT']]],
-      ['Ajuda', [['Comandos e atalhos', 'HELP', 'F1'], ['Sobre', () => this.about()]]],
-    ];
-    const bar = $('#menubar');
-    bar.append(h('div', { class: 'logo' }, h('span', { class: 'logo-mark' }, '◢'), ' WebCAD 2D'));
-    let open = null;
-    for (const [name, items] of menus) {
-      const dd = h('div', { class: 'dropdown' });
-      for (const it of items) {
-        if (it === '-') { dd.append(h('div', { class: 'sep' })); continue; }
-        const [label, act, key] = it;
-        dd.append(h('div', { class: 'item', onclick: () => { close(); (typeof act === 'function' ? act : R(act))(); } }, h('span', {}, label), h('span', { class: 'key' }, key || '')));
-      }
-      const m = h('div', { class: 'menu' }, h('span', { class: 'mlabel' }, name), dd);
-      m.addEventListener('mousedown', (ev) => { if (ev.target.closest('.dropdown')) return; if (open === m) close(); else { close(); m.classList.add('open'); open = m; } });
-      m.addEventListener('mouseenter', () => { if (open && open !== m) { close(); m.classList.add('open'); open = m; } });
-      bar.append(m);
-    }
-    const close = () => { if (open) open.classList.remove('open'); open = null; };
-    document.addEventListener('mousedown', (ev) => { if (!ev.target.closest('.menu')) close(); });
-    this.titleEl = h('div', { class: 'doctitle' }); bar.append(this.titleEl);
-  }
-  updateTitle() { const d = this.app.doc; this.titleEl.textContent = d.name + (d.dirty ? ' *' : ''); document.title = `${d.name}${d.dirty ? ' *' : ''} — WebCAD 2D`; }
-  // ---------- toolbar ----------
-  buildToolbar() {
-    const tb = $('#toolbar');
-    const group = (title, btns, extra) => {
-      const g = h('div', { class: 'tgroup' }, h('div', { class: 'tbtns' }, ...btns.map(([ic, cmd, tip]) => h('button', { class: 'tb', title: tip + (cmd ? ` (${cmd})` : ''), html: icon(ic), onclick: () => (typeof cmd === 'function' ? cmd() : this.app.runImmediate(cmd)) })), extra || null), h('div', { class: 'gtitle' }, title));
-      tb.append(g);
-    };
-    group('Arquivo', [['new', 'NEW', 'Novo'], ['open', 'OPEN', 'Abrir'], ['save', 'QSAVE', 'Salvar'], ['plot', 'PLOT', 'Plotar PDF'], ['undo', 'U', 'Desfazer'], ['redo', 'REDO', 'Refazer']]);
-    group('Desenhar', [['line', 'LINE', 'Linha'], ['pline', 'PLINE', 'Polilinha'], ['circle', 'CIRCLE', 'Círculo'], ['arc', 'ARC', 'Arco'], ['rect', 'RECTANG', 'Retângulo'], ['polygon', 'POLYGON', 'Polígono'], ['ellipse', 'ELLIPSE', 'Elipse'], ['spline', 'SPLINE', 'Spline'], ['point', 'POINT', 'Ponto'], ['xline', 'XLINE', 'Linha de construção'], ['hatch', 'HATCH', 'Hachura'], ['boundary', 'BOUNDARY', 'Contorno'], ['text', 'TEXT', 'Texto'], ['mtext', 'MTEXT', 'Texto múltiplo']]);
-    group('Modificar', [['move', 'MOVE', 'Mover'], ['copy', 'COPY', 'Copiar'], ['rotate', 'ROTATE', 'Rotacionar'], ['scale', 'SCALE', 'Escala'], ['mirror', 'MIRROR', 'Espelhar'], ['offset', 'OFFSET', 'Offset'], ['array', 'ARRAY', 'Matriz'], ['trim', 'TRIM', 'Aparar'], ['extend', 'EXTEND', 'Estender'], ['fillet', 'FILLET', 'Concordar'], ['chamfer', 'CHAMFER', 'Chanfrar'], ['break', 'BREAK', 'Quebrar'], ['join', 'JOIN', 'Unir'], ['stretch', 'STRETCH', 'Esticar'], ['explode', 'EXPLODE', 'Explodir'], ['erase', 'ERASE', 'Apagar'], ['matchprop', 'MATCHPROP', 'Copiar propriedades']]);
-    group('Anotação', [['dimlin', 'DIMLINEAR', 'Cota linear'], ['dimali', 'DIMALIGNED', 'Cota alinhada'], ['dimrad', 'DIMRADIUS', 'Cota de raio'], ['dimdia', 'DIMDIAMETER', 'Cota de diâmetro'], ['dimang', 'DIMANGULAR', 'Cota angular'], ['leader', 'QLEADER', 'Chamada'], ['block', 'BLOCK', 'Criar bloco'], ['insert', 'INSERT', 'Inserir bloco']]);
-    // camadas e propriedades
-    this.layerCombo = h('div', { class: 'combo layercombo', onclick: (ev) => this.layerDropdown(ev) });
-    this.colorSel = h('select', { class: 'sel', title: 'Cor', onchange: async (ev) => { const v = ev.target.value; if (v === 'more') { const c = await this.colorPicker(this.app.cur.color); if (c) { this.app.cur.color = c.color; this.app.cur.tc = c.tc; } } else { this.app.cur.color = +v; this.app.cur.tc = null; } this.applyToSel({ color: this.app.cur.color, tc: this.app.cur.tc }); this.refreshToolbar(); } });
-    this.ltSel = h('select', { class: 'sel', title: 'Tipo de linha', onchange: (ev) => { this.app.cur.ltype = ev.target.value; this.applyToSel({ ltype: ev.target.value }); } });
-    this.lwSel = h('select', { class: 'sel', title: 'Espessura', onchange: (ev) => { this.app.cur.lw = +ev.target.value; this.applyToSel({ lw: +ev.target.value }); } });
-    const lg = h('div', { class: 'tgroup' }, h('div', { class: 'tcol' },
-      h('div', { class: 'trow' }, h('button', { class: 'tb', title: 'Gerenciador de camadas (LA)', html: icon('layers'), onclick: () => this.app.runImmediate('LAYER') }), this.layerCombo),
-      h('div', { class: 'trow' }, this.colorSel, this.ltSel, this.lwSel)), h('div', { class: 'gtitle' }, 'Camadas e propriedades'));
-    tb.append(lg);
-    group('Vista / Consulta', [['zoomext', 'ZE', 'Zoom extensão'], ['zoomwin', 'ZOOM', 'Zoom janela'], ['pan', 'PAN', 'Pan'], ['dist', 'DIST', 'Distância'], ['area', 'AREA', 'Área'], ['list', 'LIST', 'Listar'], ['props', 'PROPERTIES', 'Propriedades'], ['help', 'HELP', 'Ajuda']]);
+  updateTitle() {
+    const d = this.app.doc; this.titleEl.textContent = `WebCAD 2D   ${d.name}${d.dirty ? '*' : ''}`; document.title = `${d.name}${d.dirty ? ' *' : ''} — WebCAD 2D`;
+    const key = d.name + (d.dirty ? '*' : '') + this.docs.length + ':' + this.curDoc + (this.startOpen ? 's' : '');
+    if (key !== this._tabsKey) { this._tabsKey = key; renderDocTabs(this); }
   }
   applyToSel(o) {
     const app = this.app; if (!app.sel.size) return;
@@ -167,38 +163,31 @@ export class UI {
     document.body.append(dd); setTimeout(() => document.addEventListener('mousedown', out), 0);
   }
   layerSet(L, o) { const d = this.app.doc; d.begin('layer'); d.tablesChanged(); Object.assign(L, o); d.commit(); this.app.redraw(); }
-  // ---------- status ----------
-  buildStatus() {
-    const st = $('#status');
-    this.coordEl = h('div', { class: 'coords' }, '0, 0, 0');
-    st.append(this.coordEl);
-    const tg = h('div', { class: 'toggles' });
-    this.toggleBtns = {};
-    for (const [k, label, tip] of [['grid', 'GRADE', 'F7'], ['snap', 'SNAP', 'F9'], ['ortho', 'ORTO', 'F8'], ['polar', 'POLAR', 'F10'], ['osnap', 'OSNAP', 'F3'], ['otrack', 'RASTR', 'F11 rastreamento de snap'], ['dyn', 'DIN', 'F12'], ['lwt', 'EL', 'Espessura de linha']]) {
-      const b = h('button', { class: 'tog', title: `${label} (${tip}) — clique direito: configurações`, onclick: () => this.app.toggle(k), oncontextmenu: (ev) => { ev.preventDefault(); this.settingsDialog(); } }, label);
-      this.toggleBtns[k] = b; tg.append(b);
-    }
-    st.append(tg);
-    st.append(h('div', { class: 'tabs' }, h('span', { class: 'tab active' }, 'Modelo')));
-    this.infoEl = h('div', { class: 'info' }); this.perfEl = h('div', { class: 'info perf', title: 'Tempo da última renderização' });
-    st.append(h('div', { class: 'spacer' }), this.infoEl, this.perfEl);
+  refreshStatus() {
+    for (const [k, b] of Object.entries(this.toggleBtns)) if (k[0] !== '_') b.classList.toggle('on', !!this.app.settings[k]);
+    this.toggleBtns._pick.classList.toggle('on', this.app.settings.pickstyle !== false);
+    this.toggleBtns._iso.classList.toggle('alert', !!(this.app.doc.hidden && this.app.doc.hidden.size));
+    if (this.scaleSel) { const v = String(this.app.doc.dimstyle.dimscale || 1); if (![...this.scaleSel.options].some((o) => o.value === v)) this.scaleSel.append(h('option', { value: v }, '1:' + v)); this.scaleSel.value = v; }
   }
-  refreshStatus() { for (const [k, b] of Object.entries(this.toggleBtns)) b.classList.toggle('on', !!this.app.settings[k]); }
   // ---------- linha de comando ----------
   buildCmd() {
     const c = $('#cmd');
     this.histEl = h('div', { class: 'hist' });
-    this.promptEl = h('span', { class: 'prompt' }, 'Comando:');
-    const inp = h('input', { id: 'cmdInput', autocomplete: 'off', spellcheck: 'false', placeholder: 'Digite um comando (ex: L, C, REC, TR, AJUDA)' });
+    this.promptEl = h('span', { class: 'prompt' }, '');
+    const inp = h('input', { id: 'cmdInput', autocomplete: 'off', spellcheck: 'false', placeholder: 'Digite um comando' });
     this.app.cmdInput = inp;
     this.autoEl = h('div', { class: 'auto' });
-    c.append(this.histEl, h('div', { class: 'cline' }, h('span', { class: 'chev' }, '›'), this.promptEl, inp), this.autoEl);
+    const btnX = h('button', { class: 'cl-b', title: 'Ocultar linha de comando (Ctrl+9)', onclick: () => this.toggleCmdLine() }, '✕');
+    const btnW = h('button', { class: 'cl-b', title: 'Histórico completo (F2)', html: icon('wrench', 14), onclick: () => this.toggleHist() });
+    const btnR = h('button', { class: 'cl-b', title: 'Comandos recentes', onclick: (ev) => popupMenu(ev.currentTarget, this.cmdHist.slice(-12).reverse().map((n) => ({ label: n, act: () => this.app.run(n) })).concat(this.cmdHist.length ? [] : [{ label: '(nenhum comando ainda)', act: () => {} }])) }, '▸');
+    c.append(this.histEl, h('div', { class: 'cline' }, h('span', { class: 'grip' }, '⁞'), btnX, btnW, btnR, this.promptEl, inp), this.autoEl);
     inp.addEventListener('input', () => this.updateAuto());
     inp.addEventListener('keydown', (ev) => {
       if (ev.key === 'Tab' && this.autoList && this.autoList.length) { ev.preventDefault(); inp.value = this.autoList[0]; this.updateAuto(); }
     });
-    this.addHist('WebCAD 2D pronto. Digite um comando ou use a barra de ferramentas. F1/AJUDA para a lista de comandos.', 'dim');
+    this.addHist('WebCAD 2D pronto. Digite um comando ou use a faixa de opções. F1 ou AJUDA lista todos os comandos.', 'dim');
   }
+  toggleCmdLine() { $('#cmd').hidden = !$('#cmd').hidden; if (!$('#cmd').hidden) this.app.cmdInput.focus(); }
   updateAuto() {
     const v = this.app.cmdInput.value.trim().toUpperCase();
     this.autoEl.innerHTML = ''; this.autoList = [];
@@ -218,7 +207,8 @@ export class UI {
   }
   setPrompt(p, kws = []) {
     this.promptEl.innerHTML = '';
-    if (!p) { this.promptEl.textContent = 'Comando:'; return; }
+    if (!p) { this.promptEl.textContent = ''; this.app.cmdInput.placeholder = 'Digite um comando'; return; }
+    this.app.cmdInput.placeholder = '';
     const m = p.match(/^(.*?)\[(.*?)\](.*)$/);
     if (m) {
       this.promptEl.append(m[1], '[');
@@ -242,7 +232,7 @@ export class UI {
     this.propsEl = $('#props');
     $('#sideToggle').addEventListener('click', () => { document.body.classList.toggle('noside'); setTimeout(() => this.app.resize(), 50); });
   }
-  showProps() { document.body.classList.remove('noside'); setTimeout(() => this.app.resize(), 50); }
+  showProps(toggle) { if (toggle) document.body.classList.toggle('noside'); else document.body.classList.remove('noside'); try { localStorage.setItem('webcad.side', document.body.classList.contains('noside') ? '0' : '1'); } catch { /* */ } setTimeout(() => this.app.resize(), 50); }
   refreshProps() {
     if (this._propTimer) return;
     this._propTimer = requestAnimationFrame(() => { this._propTimer = null; this.renderProps(); });
@@ -488,10 +478,11 @@ export class UI {
     if (!ok) return null;
     return { pattern: cur, scale: this.app.parseNumber(sc.value) || 1, angle: this.app.parseNumber(an.value) || 0, mode: mode.value };
   }
-  async chooseBlock(names) {
+  async chooseBlock(names, title = 'Inserir bloco') {
+    if (this._preBlock && names.includes(this._preBlock)) { const b = this._preBlock; this._preBlock = null; return b; }
     const sel = h('select', { size: Math.min(12, names.length + 1), class: 'blist' }, ...names.map((n) => h('option', { value: n }, n))); sel.value = names[0];
     sel.addEventListener('dblclick', () => document.querySelector('.modal.open .btn.primary').click());
-    const ok = await this.modal('Inserir bloco', h('div', {}, h('p', {}, `${names.length} bloco(s) neste desenho:`), sel));
+    const ok = await this.modal(title, h('div', {}, h('p', {}, `${names.length} bloco(s) neste desenho:`), sel));
     return ok ? sel.value : null;
   }
   // ---------- arquivos ----------
@@ -502,13 +493,15 @@ export class UI {
     return r === 'discard';
   }
   async fileNew() {
-    if (!(await this.confirmDiscard())) return;
-    const app = this.app; app.doc.clear(); app.doc.name = 'Desenho' + (++this._newCount || (this._newCount = 2)) + '.dxf';
-    this.fileHandle = null; app.clearSel(); app.view = { cx: 100, cy: 70, scale: Math.min(app.W / 240, app.H / 160) }; app.doc.version++; this.refreshToolbar(); app.redraw();
+    const d = new Doc(); let n = 1; const names = new Set(this.docs.map((x) => x.doc.name)); while (names.has('Desenho' + n + '.dxf')) n++;
+    d.name = 'Desenho' + n + '.dxf';
+    const cur = this.app.doc;
+    if (!this.startOpen && cur.ents.size === 0 && !cur.dirty && this.docs.length === 1 && cur.blocks.size === 0) { this.docs[0].doc = d; this.app.switchDoc(d, null); this.showStart(false); }
+    else this.newTab(d);
+    this.app.view = { cx: 100, cy: 70, scale: Math.min(this.app.vp.w / 240, this.app.vp.h / 160) }; d.version++; this.refreshToolbar(); this.app.redraw(); this._tabsKey = null; this.updateTitle();
     this.addHist('Novo desenho criado.', 'dim');
   }
   async fileOpen() {
-    if (!(await this.confirmDiscard())) return;
     if (window.showOpenFilePicker) {
       try {
         const [hd] = await window.showOpenFilePicker({ types: [{ description: 'Desenhos CAD', accept: { 'application/octet-stream': ['.dwg', '.dxf'] } }] });
@@ -523,7 +516,7 @@ export class UI {
     const wrap = $('#canvasWrap');
     wrap.addEventListener('dragover', (ev) => { ev.preventDefault(); wrap.classList.add('drop'); });
     wrap.addEventListener('dragleave', () => wrap.classList.remove('drop'));
-    wrap.addEventListener('drop', async (ev) => { ev.preventDefault(); wrap.classList.remove('drop'); const f = ev.dataTransfer.files[0]; if (f && (await this.confirmDiscard())) this.loadFile(f); });
+    wrap.addEventListener('drop', async (ev) => { ev.preventDefault(); wrap.classList.remove('drop'); for (const f of ev.dataTransfer.files) if (/\.(dwg|dxf)$/i.test(f.name)) await this.loadFile(f); });
   }
   busy(text) {
     let el = $('#busy'); if (!el) { el = h('div', { id: 'busy' }); document.body.append(el); }
@@ -545,8 +538,8 @@ export class UI {
         text = decodeDxfBytes(dxfBytes.buffer.slice(dxfBytes.byteOffset, dxfBytes.byteOffset + dxfBytes.byteLength));
       } else text = decodeDxfBytes(buf);
       this.busy('Interpretando desenho...'); await new Promise((r) => setTimeout(r, 10));
-      const doc = app.doc;
-      const st = parseDxf(text, doc);
+      const doc = this.targetDoc();
+      const st = parseDxf(text, doc); setFont(doc.header.font || 'Arial'); this.showStart(false);
       doc.name = file.name.replace(/\.dwg$/i, '.dxf');
       this.fileHandle = isDwgFile ? null : handle || null;
       app.clearSel(); app.viewStack = [];
@@ -592,8 +585,8 @@ export class UI {
     sel.value = list[0].name;
     const r = await this.modal('Abrir do navegador', sel, [['Abrir', true], ['Excluir', 'del', false], ['Cancelar', false]]);
     if (r === 'del') { await store.del(sel.value); return this.openFromBrowser(); }
-    if (!r || !(await this.confirmDiscard())) return;
-    const rec = await store.get(sel.value); parseDxf(rec.data, this.app.doc); this.app.doc.name = rec.name; this.fileHandle = null; this.app.zoomExtents(); this.app.doc.version++; this.refreshToolbar();
+    if (!r) return;
+    const rec = await store.get(sel.value); const tdoc = this.targetDoc(); parseDxf(rec.data, tdoc); tdoc.name = rec.name; setFont(tdoc.header.font || 'Arial'); this._tabsKey = null; this.fileHandle = null; this.app.zoomExtents(); this.app.doc.version++; this.refreshToolbar();
   }
   async autosave() {
     const d = this.app.doc; if (!d.dirty || d.ents.size > 300000) return;
@@ -606,7 +599,7 @@ export class UI {
     const ok = await this.modal('Recuperar desenho', h('p', {}, `Foi encontrado um autosalvamento de "${o.name}" de ${new Date(o.time).toLocaleString()}. Deseja recuperá-lo?`), [['Recuperar', true], ['Descartar', 'discard', false], ['Cancelar', false]]);
     if (ok === 'discard') { store.put('__autosave__', ''); return; }
     if (!ok) return;
-    parseDxf(o.dxf, this.app.doc); this.app.doc.name = o.name; this.app.doc.dirty = true; this.app.zoomExtents(); this.app.doc.version++; this.refreshToolbar();
+    const tdoc = this.targetDoc(); parseDxf(o.dxf, tdoc); tdoc.name = o.name; this._tabsKey = null; this.app.doc.dirty = true; this.app.zoomExtents(); this.app.doc.version++; this.refreshToolbar();
   }
   // ---------- exportação ----------
   async exportDialog() {
@@ -681,6 +674,101 @@ export class UI {
       download(blob, name);
       this.addHist(`Plotado: ${name}`);
     } finally { this.busy(null); }
+  }
+  // ---------- diálogos dos comandos novos ----------
+  pickFile(accept) {
+    return new Promise((res) => {
+      const inp = h('input', { type: 'file', accept }); let done = false;
+      inp.onchange = () => { done = true; res(inp.files[0] || null); };
+      window.addEventListener('focus', () => setTimeout(() => { if (!done) res(null); }, 800), { once: true });
+      inp.click();
+    });
+  }
+  async tableDialog() {
+    const n = (v) => h('input', { type: 'text', class: 'num', value: v });
+    const cols = n(4), rows = n(5), cw = n(30), rh = n(9), th = n(this.app.doc.header.textsize || 2.5);
+    const title = h('input', { type: 'checkbox', checked: true });
+    const data = h('textarea', { rows: 6, class: 'big', placeholder: 'Opcional: cole aqui do Excel/Planilhas, ou digite uma linha por linha da tabela com colunas separadas por ; ou Tab.\nA primeira linha vira o título se a opção estiver marcada.' });
+    if (!(await this.modal('Inserir tabela', h('div', {}, h('div', { class: 'cols' }, h('div', {}, this.field('Colunas', cols), this.field('Linhas', rows), this.field('Largura da coluna', cw)), h('div', {}, this.field('Altura da linha', rh), this.field('Altura do texto', th), h('label', { class: 'chk' }, title, ' Primeira linha é título (mesclada)'))), data), [['OK', true], ['Cancelar', false]], 'wide'))) return null;
+    const P = (x, d) => this.app.parseNumber(x.value) || d;
+    const lines = data.value.split(/\r?\n/).filter((l) => l.trim().length);
+    const parsed = lines.map((l) => l.split(l.includes('\t') ? '\t' : ';'));
+    let c = Math.round(P(cols, 4)); if (parsed.length) c = Math.max(c, ...parsed.slice(title.checked ? 1 : 0).map((r) => r.length), 1);
+    return { cols: c, rows: Math.max(Math.round(P(rows, 5)), parsed.length), cw: P(cw, 30), rh: P(rh, 9), th: P(th, 2.5), title: title.checked, data: parsed };
+  }
+  async attribDialog(ins) {
+    const inputs = ins.attribs.map((a) => h('input', { type: 'text', value: a.str }));
+    const ok = await this.modal(`Editar atributos — ${ins.name}`, h('div', {}, ...ins.attribs.map((a, i) => this.field(a.tag || 'ATRIBUTO', inputs[i]))));
+    return ok ? inputs.map((x) => x.value) : null;
+  }
+  async qselectDialog() {
+    const app = this.app, doc = app.doc;
+    const types = [...new Set([...doc.ents.values()].map((e) => e.type))];
+    const typeS = h('select', {}, h('option', { value: '' }, 'Vários (todos os tipos)'), ...types.map((t) => h('option', { value: t }, TYPE_NAMES[t] || t)));
+    const propS = h('select', {}, ...[['layer', 'Camada'], ['color', 'Cor'], ['ltype', 'Tipo de linha'], ['lw', 'Espessura'], ['str', 'Conteúdo do texto'], ['h', 'Altura do texto'], ['name', 'Nome do bloco']].map(([v, l]) => h('option', { value: v }, l)));
+    const opS = h('select', {}, ...[['=', '= Igual a'], ['!=', '≠ Diferente de'], ['~', 'Contém'], ['>', '> Maior que'], ['<', '< Menor que'], ['*', 'Selecionar tudo']].map(([v, l]) => h('option', { value: v }, l)));
+    const val = h('input', { type: 'text', list: 'qsvals' }); const dl = h('datalist', { id: 'qsvals' });
+    const fill = () => { dl.innerHTML = ''; const p = propS.value; const vs = new Set(); for (const e of doc.ents.values()) if (e[p] != null && (!typeS.value || e.type === typeS.value)) vs.add(String(e[p])); [...vs].slice(0, 200).forEach((v) => dl.append(h('option', { value: v }))); };
+    propS.onchange = fill; typeS.onchange = fill; fill();
+    const mode = h('select', {}, h('option', { value: 'new' }, 'Novo conjunto de seleção'), h('option', { value: 'add' }, 'Adicionar à seleção atual'), h('option', { value: 'not' }, 'Excluir correspondentes (inverter)'));
+    if (!(await this.modal('Seleção rápida', h('div', {}, this.field('Tipo de objeto', typeS), this.field('Propriedade', propS), this.field('Operador', opS), this.field('Valor', h('span', {}, val, dl)), this.field('Como aplicar', mode))))) return 0;
+    const p = propS.value, op = opS.value, v = val.value.trim();
+    const test = (e) => {
+      if (typeS.value && e.type !== typeS.value) return false;
+      if (op === '*') return true;
+      const x = e[p]; if (x == null) return false;
+      const sx = String(x), nx = parseFloat(sx), nv = parseFloat(v);
+      if (op === '=') return sx.toLowerCase() === v.toLowerCase(); if (op === '!=') return sx.toLowerCase() !== v.toLowerCase();
+      if (op === '~') return sx.toLowerCase().includes(v.toLowerCase()); if (op === '>') return nx > nv; if (op === '<') return nx < nv; return false;
+    };
+    const all = [...doc.ents.values()].filter((e) => doc.visible(e) && app.selectable(e));
+    let res = all.filter(test);
+    if (mode.value === 'not') res = all.filter((e) => !test(e));
+    if (mode.value === 'add') app.addSel(res); else app.setSel(res);
+    return res.length;
+  }
+  async gradientDialog(prev) {
+    const c1 = h('input', { type: 'color', value: prev.c1 }), c2 = h('input', { type: 'color', value: prev.c2 }), an = h('input', { type: 'text', class: 'num', value: prev.angle });
+    const prevBox = h('div', { class: 'gradprev' }); const upd = () => { prevBox.style.background = `linear-gradient(${90 - (+an.value || 0)}deg, ${c1.value}, ${c2.value})`; }; [c1, c2, an].forEach((x) => x.addEventListener('input', upd)); upd();
+    const mode = h('select', {}, h('option', { value: 'pick' }, 'Clicar ponto interno'), h('option', { value: 'select' }, 'Selecionar objetos fechados')); mode.value = prev.mode || 'pick';
+    if (!(await this.modal('Gradiente', h('div', {}, prevBox, this.field('Cor 1', c1), this.field('Cor 2', c2), this.field('Ângulo (°)', an), this.field('Contorno', mode)), [['Continuar', true], ['Cancelar', false]]))) return null;
+    return { c1: c1.value, c2: c2.value, angle: this.app.parseNumber(an.value) || 0, mode: mode.value };
+  }
+  async pointStyleDialog() {
+    const H = this.app.doc.header; let mode = H.pdmode || 0;
+    const modes = [0, 1, 2, 3, 4, 32, 33, 34, 35, 36, 64, 65, 66, 67, 68, 96, 97, 98, 99, 100];
+    const grid = h('div', { class: 'ptgrid' });
+    const draw = (m) => { const c = h('canvas', { width: 44, height: 44 }); const x = c.getContext('2d'); x.strokeStyle = '#dfe6ee'; x.fillStyle = '#dfe6ee'; x.lineWidth = 1.5; const q = 22, r = 12, b = m & 7; x.beginPath(); if (b === 0) x.fillRect(q - 1.5, q - 1.5, 3, 3); if (b === 2) { x.moveTo(q - r, q); x.lineTo(q + r, q); x.moveTo(q, q - r); x.lineTo(q, q + r); } if (b === 3) { x.moveTo(q - r, q - r); x.lineTo(q + r, q + r); x.moveTo(q + r, q - r); x.lineTo(q - r, q + r); } if (b === 4) { x.moveTo(q, q); x.lineTo(q, q - r); } if (m & 32) { x.moveTo(q + r, q); x.arc(q, q, r, 0, 7); } if (m & 64) x.rect(q - r, q - r, 2 * r, 2 * r); x.stroke(); return c; };
+    for (const m of modes) { const b = h('div', { class: 'pt' + (m === mode ? ' on' : ''), title: 'PDMODE ' + m, onclick: () => { mode = m; grid.querySelectorAll('.pt').forEach((x) => x.classList.remove('on')); b.classList.add('on'); } }, draw(m)); grid.append(b); }
+    const size = h('input', { type: 'text', class: 'num', value: Math.abs(H.pdsize || 5) });
+    const rel = h('select', {}, h('option', { value: 'rel' }, 'Relativo à tela (%)'), h('option', { value: 'abs' }, 'Em unidades absolutas')); rel.value = H.pdsize > 0 ? 'abs' : 'rel';
+    if (!(await this.modal('Estilo de ponto', h('div', {}, grid, this.field('Tamanho do ponto', size), this.field('', rel))))) return null;
+    const v = this.app.parseNumber(size.value) || 5;
+    return { mode, size: rel.value === 'abs' ? v : -v };
+  }
+  async textStyleDialog() {
+    const H = this.app.doc.header;
+    const font = h('select', {}, ...['Arial', 'Arial Narrow', 'ISOCP', 'Times New Roman', 'Courier New', 'Verdana', 'Segoe UI'].map((f) => h('option', { value: f }, f === 'ISOCP' ? 'ISOCP (técnica)' : f))); font.value = H.font || 'Arial';
+    const ht = h('input', { type: 'text', class: 'num', value: H.textsize || 2.5 });
+    const pv = h('div', { class: 'fontprev' }, 'AaBbCc 0123 — Planta Baixa Ø25'); font.onchange = () => { pv.style.fontFamily = font.value === 'ISOCP' ? '"Arial Narrow", Arial' : font.value; }; font.onchange();
+    if (!(await this.modal('Estilo de texto (Standard)', h('div', {}, this.field('Fonte', font), this.field('Altura padrão', ht), pv, h('p', { class: 'note' }, 'A fonte vale para todo o desenho na tela, no PDF e na imagem. No DXF, o estilo Standard é gravado com a fonte TrueType correspondente.'))))) return null;
+    return { font: font.value, h: this.app.parseNumber(ht.value) || 2.5 };
+  }
+  async findDialog() {
+    const app = this.app, doc = app.doc;
+    const f = h('input', { type: 'text' }), r = h('input', { type: 'text' }), cs = h('input', { type: 'checkbox' });
+    const info = h('p', { class: 'note' }, '');
+    const texts = () => [...doc.ents.values()].filter((e) => ['TEXT', 'MTEXT', 'ATTDEF'].includes(e.type) || (e.type === 'DIMENSION' && e.text && e.text !== '<>') || (e.type === 'INSERT' && e.attribs && e.attribs.length));
+    const match = (s) => { if (!f.value) return false; return cs.checked ? s.includes(f.value) : s.toLowerCase().includes(f.value.toLowerCase()); };
+    const strOf = (e) => e.type === 'DIMENSION' ? e.text : e.type === 'INSERT' ? e.attribs.map((a) => a.str).join(' ') : e.str || '';
+    const body = h('div', {}, this.field('Localizar', f), this.field('Substituir por', r), h('label', { class: 'chk' }, cs, ' Diferenciar maiúsculas/minúsculas'), h('div', { class: 'mtools' },
+      h('button', { class: 'btn', onclick: () => { const m = texts().filter((e) => match(strOf(e))); app.setSel(m); if (m.length) app.zoomBB(m.reduce((b, e) => G.bbUnion(b, doc.bbox(e)), G.bbEmpty()), 0.2); info.textContent = `${m.length} ocorrência(s) encontrada(s) e selecionada(s).`; } }, 'Localizar e selecionar'),
+      h('button', { class: 'btn', onclick: () => {
+        if (!f.value) return; const re = new RegExp(f.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), cs.checked ? 'g' : 'gi'); let n = 0;
+        doc.begin('FIND'); for (const e of texts()) { if (!match(strOf(e))) continue; doc.modify(e, (x) => { if (x.type === 'DIMENSION') { x.text = x.text.replace(re, r.value); x.block = null; } else if (x.type === 'INSERT') x.attribs.forEach((a) => { a.str = a.str.replace(re, r.value); delete a._lay; }); else { x.str = x.str.replace(re, r.value); delete x._lay; } }); n++; } doc.commit();
+        info.textContent = `${n} objeto(s) alterado(s).`;
+      } }, 'Substituir tudo')), info);
+    await this.modal('Localizar e substituir', body, [['Fechar', true]]);
   }
   helpDialog() {
     const app = this.app;

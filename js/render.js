@@ -4,6 +4,7 @@ import { T, textCorners, mtextLayout, cleanText, dispStr, textWidth, FONT, CAP, 
 import { aciCss, trueCss } from './colors.js';
 const { P, M, ap, apv } = G;
 
+const IMGCACHE = new Map();
 export class Renderer {
   constructor(ctx, doc, opts = {}) {
     this.ctx = ctx; this.doc = doc;
@@ -143,7 +144,40 @@ export class Renderer {
         break;
       }
       case 'HATCH': this.drawHatch(e, Tm); break;
+      case 'POINT': this.drawPoint(e, Tm); break;
+      case 'IMAGE': this.drawImage(e, Tm); break;
     }
+  }
+  drawPoint(e, Tm) {
+    const c = this.ctx, H = this.doc.header, mode = H.pdmode || 0;
+    const q = ap(Tm, e.p); const d = this.dpr;
+    let sz = H.pdsize > 0 ? H.pdsize * G.mScale(Tm) : (this.viewH || 600 * d) * (H.pdsize < 0 ? -H.pdsize / 100 : 0.05);
+    sz = Math.max(2 * d, Math.min(sz, 400 * d)); const r = sz / 2;
+    c.setTransform(1, 0, 0, 1, 0, 0); c.beginPath();
+    const base = mode & 7;
+    if (base === 0) { c.fillRect(q.x - d, q.y - d, 2 * d, 2 * d); }
+    else if (base === 2) { c.moveTo(q.x - r, q.y); c.lineTo(q.x + r, q.y); c.moveTo(q.x, q.y - r); c.lineTo(q.x, q.y + r); }
+    else if (base === 3) { c.moveTo(q.x - r, q.y - r); c.lineTo(q.x + r, q.y + r); c.moveTo(q.x + r, q.y - r); c.lineTo(q.x - r, q.y + r); }
+    else if (base === 4) { c.moveTo(q.x, q.y); c.lineTo(q.x, q.y - r); }
+    if (mode & 32) { c.moveTo(q.x + r, q.y); c.arc(q.x, q.y, r, 0, G.TAU); }
+    if (mode & 64) c.rect(q.x - r, q.y - r, sz, sz);
+    c.stroke(); c.beginPath();
+  }
+  drawImage(e, Tm) {
+    const c = this.ctx; const p = e.pts;
+    if (e.img && typeof Image !== 'undefined' && c.drawImage) {
+      let im = IMGCACHE.get(e.img);
+      if (!im) { im = new Image(); im.onload = () => { im._ok = true; if (Renderer.onImageLoad) Renderer.onImageLoad(); }; im.src = e.img; IMGCACHE.set(e.img, im); }
+      if (im._ok) {
+        // mapeia (0,0)-(1,1) da imagem para p0, p1 (u) e p3 (v); a imagem tem y para baixo
+        const u = G.sub(p[1], p[0]), v = G.sub(p[3], p[0]);
+        const m = G.M.mul(Tm, [u.x / im.width, u.y / im.width, -v.x / im.height, -v.y / im.height, p[3].x, p[3].y]);
+        c.save(); c.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]); if (e.fade) c.globalAlpha = 1 - e.fade / 100; c.drawImage(im, 0, 0); c.restore(); c.beginPath();
+        if (e.frame === false) return;
+      }
+    }
+    c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]); c.beginPath(); loopPath(c, p, true);
+    c.setTransform(1, 0, 0, 1, 0, 0); c.stroke(); c.beginPath();
   }
   drawHatch(e, Tm) {
     const c = this.ctx;
@@ -151,7 +185,15 @@ export class Renderer {
     c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]); c.beginPath();
     for (const l of e.loops) loopPath(c, l, true);
     c.setTransform(1, 0, 0, 1, 0, 0);
-    if (e.solid || (e.pattern || '').toUpperCase() === 'SOLID') { c.fill('evenodd'); c.restore(); c.beginPath(); return; }
+    if (e.solid || (e.pattern || '').toUpperCase() === 'SOLID') {
+      if (e.gradient && c.createLinearGradient && !this.mono) {
+        const bb = T.HATCH.bbox(e); const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2, R = Math.hypot(bb.maxX - bb.minX, bb.maxY - bb.minY) / 2;
+        const a = e.gradient.angle || 0; const p1 = ap(Tm, P(cx - Math.cos(a) * R, cy - Math.sin(a) * R)), p2 = ap(Tm, P(cx + Math.cos(a) * R, cy + Math.sin(a) * R));
+        const gr = c.createLinearGradient(p1.x, p1.y, p2.x, p2.y); gr.addColorStop(0, e.gradient.c1); gr.addColorStop(1, e.gradient.c2);
+        c.fillStyle = gr;
+      }
+      c.fill('evenodd'); c.restore(); c.beginPath(); return;
+    }
     c.clip('evenodd');
     c.beginPath();
     const pat = e.pat && e.pat.length ? e.pat : (makePattern(e.pattern || 'ANSI31', e.scale || 1, e.angle || 0) || makePattern('ANSI31', e.scale || 1, e.angle || 0));

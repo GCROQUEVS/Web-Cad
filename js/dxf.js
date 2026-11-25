@@ -60,7 +60,7 @@ export function parseDxf(text, doc) {
   }
   doc.clear();
   doc.layers.clear();
-  const blocksRaw = [];
+  const blocksRaw = []; let objsRaw = [];
   const entsRaw = [];
   while (i < pairs.length) {
     const p = peek();
@@ -83,6 +83,7 @@ export function parseDxf(text, doc) {
         if (nm === 'TABLES') readTables(objs, doc);
         else if (nm === 'BLOCKS') for (const x of objs) blocksRaw.push(x);
         else if (nm === 'ENTITIES') for (const x of objs) entsRaw.push(x);
+        else if (nm === 'OBJECTS') objsRaw = objs;
       } else {
         while (i < pairs.length && !(pairs[i][0] === 0 && pairs[i][1].trim() === 'ENDSEC')) i++;
         next();
@@ -100,6 +101,7 @@ export function parseDxf(text, doc) {
   if (hv('$DIMASZ', 40)) doc.dimstyle.dimasz = parseFloat(hv('$DIMASZ', 40));
   if (hv('$DIMDEC', 70)) doc.dimstyle.dimdec = parseInt(hv('$DIMDEC', 70));
   if (hv('$TEXTSIZE', 40)) doc.header.textsize = parseFloat(hv('$TEXTSIZE', 40));
+  if (hv('$PDMODE', 70)) doc.header.pdmode = parseInt(hv('$PDMODE', 70)); if (hv('$PDSIZE', 40)) doc.header.pdsize = parseFloat(hv('$PDSIZE', 40));
   if (hv('$CLAYER', 8) && doc.layers.has(hv('$CLAYER', 8))) doc.curLayer = hv('$CLAYER', 8);
   if (hv('$LUPREC', 70)) doc.header.luprec = parseInt(hv('$LUPREC', 70));
   // blocos
@@ -124,6 +126,19 @@ export function parseDxf(text, doc) {
   const ents = convertList(entsRaw, doc, stats, false);
   for (const e of ents) { doc.defaults(e); doc._insert(e); }
   stats.entities = ents.length;
+  // grupos (GROUP no OBJECTS, nomes no dicionário ACAD_GROUP)
+  try {
+    const byHandle = new Map(); for (const e of doc.ents.values()) if (e.handle) byHandle.set(e.handle.toUpperCase(), e);
+    const names = new Map();
+    for (const o of objsRaw) if (o.type === 'DICTIONARY') { let last = null; for (const [c, v] of o.g) { if (c === 3) last = v.trim(); else if (c === 350 && last) { names.set(v.trim().toUpperCase(), last); last = null; } } }
+    let k = 1;
+    for (const o of objsRaw) if (o.type === 'GROUP') {
+      const ids = new Set(gall(o, 340).map((h) => byHandle.get(h.trim().toUpperCase())).filter(Boolean).map((e) => e.id));
+      if (!ids.size) continue;
+      let name = names.get((gv(o, 5) || '').trim().toUpperCase()) || ('*A' + k++);
+      doc.groups.set(name, { name, desc: gv(o, 300) || '', ids });
+    }
+  } catch (err) { console.warn('grupos', err); }
   doc.rebuildIndex();
   doc.undoStack = []; doc.redoStack = []; doc.dirty = false;
   return stats;
@@ -145,6 +160,8 @@ function readTables(objs, doc) {
       const name = (gv(o, 2) || '').toUpperCase(); if (!name || name === 'BYLAYER' || name === 'BYBLOCK') continue;
       const pat = gall(o, 49).map(parseFloat);
       doc.ltypes.set(name, { name, desc: gv(o, 3) || '', pat });
+    } else if (o.type === 'STYLE') {
+      if ((gv(o, 2) || '').trim().toUpperCase() === 'STANDARD') { const f = (gv(o, 3) || '').toLowerCase(); doc.header.font = /isocp|simplex|romans|txt/.test(f) ? 'ISOCP' : /arialn/.test(f) ? 'Arial Narrow' : /times/.test(f) ? 'Times New Roman' : /cour/.test(f) ? 'Courier New' : /verdana/.test(f) ? 'Verdana' : 'Arial'; }
     } else if (o.type === 'DIMSTYLE') {
       const nm = gv(o, 2);
       if (nm && nm.toUpperCase() === 'STANDARD' || nm === 'ISO-25') {
@@ -350,7 +367,7 @@ function convDim(o, c) {
     const a1 = pt(13, 23), a2 = pt(14, 24), b1 = pt(15, 25), b2 = pt(10, 20);
     const x = G.intLL(a1, a2, b1, b2)[0];
     e.dtype = 'ANG'; e.c = x ? x.p : a1; e.p1 = a2; e.p2 = b2; e.dp = pt(16, 26);
-  } else { e.dtype = 'ORD'; e.p1 = pt(13, 23); e.p2 = pt(14, 24); }
+  } else { e.dtype = 'ORD'; e.p1 = pt(13, 23); e.p2 = pt(14, 24); e.xaxis = !!(gi(o, 70) & 64); e.org = pt(10, 20); }
   return e;
 }
 function convHatch(o, c) {
@@ -489,6 +506,7 @@ function writeDxfCore(doc, dimMap) {
   w.g(9, '$DIMTXT'); w.g(40, doc.dimstyle.dimtxt);
   w.g(9, '$DIMDEC'); w.g(70, doc.dimstyle.dimdec);
   w.g(9, '$LUPREC'); w.g(70, doc.header.luprec ?? 4);
+  w.g(9, '$PDMODE'); w.g(70, doc.header.pdmode || 0); w.g(9, '$PDSIZE'); w.g(40, doc.header.pdsize || 0);
   w.g(9, '$CLAYER'); w.g(8, doc.curLayer);
   w.g(9, '$INSUNITS'); w.g(70, doc.header.insunits ?? 4);
   w.g(9, '$MEASUREMENT'); w.g(70, 1);
@@ -526,7 +544,7 @@ function writeDxfCore(doc, dimMap) {
   w.g(0, 'ENDTAB');
   tableStart('STYLE', 1);
   w.g(0, 'STYLE'); w.g(5, styleH); w.g(330, H.STYLE); w.g(100, 'AcDbSymbolTableRecord'); w.g(100, 'AcDbTextStyleTableRecord');
-  w.g(2, 'Standard'); w.g(70, 0); w.g(40, 0); w.g(41, 1); w.g(50, 0); w.g(71, 0); w.g(42, 2.5); w.g(3, 'arial.ttf'); w.g(4, '');
+  w.g(2, 'Standard'); w.g(70, 0); w.g(40, 0); w.g(41, 1); w.g(50, 0); w.g(71, 0); w.g(42, doc.header.textsize || 2.5); w.g(3, { 'Arial Narrow': 'arialn.ttf', 'Times New Roman': 'times.ttf', 'Courier New': 'cour.ttf', Verdana: 'verdana.ttf', 'Segoe UI': 'segoeui.ttf', ISOCP: 'isocp.shx' }[doc.header.font] || 'arial.ttf'); w.g(4, '');
   w.g(0, 'ENDTAB');
   tableStart('VIEW', 0); w.g(0, 'ENDTAB');
   tableStart('UCS', 0); w.g(0, 'ENDTAB');
@@ -547,7 +565,8 @@ function writeDxfCore(doc, dimMap) {
   w.g(0, 'ENDTAB');
   w.g(0, 'ENDSEC');
   // contexto de escrita
-  const ctx = { w, doc, ltypes, layerH, brH, styleH, dimH, dimBlocks: dimMap };
+  const ctx = { w, doc, ltypes, layerH, brH, styleH, dimH, dimBlocks: dimMap, handles: new Map(), msOwner: brH['*Model_Space'], reactors: new Map(), groupH: new Map() };
+  for (const g of (doc.groups || new Map()).values()) { const gh = w.handle(); ctx.groupH.set(g.name, gh); for (const id of g.ids) { if (!ctx.reactors.has(id)) ctx.reactors.set(id, []); ctx.reactors.get(id).push(gh); } }
   // BLOCKS
   w.g(0, 'SECTION'); w.g(2, 'BLOCKS');
   for (const [n, b] of blocks) {
@@ -568,6 +587,9 @@ function writeDxfCore(doc, dimMap) {
   w.g(0, 'DICTIONARY'); w.g(5, dictRoot); w.g(330, 0); w.g(100, 'AcDbDictionary'); w.g(281, 1);
   w.g(3, 'ACAD_GROUP'); w.g(350, dictGroup); w.g(3, 'ACAD_LAYOUT'); w.g(350, dictLayout);
   w.g(0, 'DICTIONARY'); w.g(5, dictGroup); w.g(330, dictRoot); w.g(100, 'AcDbDictionary'); w.g(281, 1);
+  const groups = [...(doc.groups || new Map()).values()].map((g) => ({ g, h: ctx.groupH.get(g.name), hs: [...g.ids].map((id) => ctx.handles.get(id)).filter(Boolean) })).filter((x) => x.hs.length);
+  for (const x of groups) { w.g(3, x.g.name); w.g(350, x.h); }
+  for (const x of groups) { w.g(0, 'GROUP'); w.g(5, x.h); w.g(330, dictGroup); w.g(100, 'AcDbGroup'); w.g(300, x.g.desc || ''); w.g(70, x.g.name.startsWith('*') ? 1 : 0); w.g(71, 1); for (const hh of x.hs) w.g(340, hh); }
   w.g(0, 'DICTIONARY'); w.g(5, dictLayout); w.g(330, dictRoot); w.g(100, 'AcDbDictionary'); w.g(281, 1);
   w.g(3, 'Model'); w.g(350, layoutModel); w.g(3, 'Layout1'); w.g(350, layoutPaper);
   for (const [lh, name, br, ord] of [[layoutModel, 'Model', brH['*Model_Space'], 0], [layoutPaper, 'Layout1', brH['*Paper_Space'], 1]]) {
@@ -593,8 +615,11 @@ function colorTags(ctx, e) {
   if (e.tc != null) w.g(420, e.tc);
 }
 function head(ctx, e, type, owner, sub) {
-  const w = ctx.w; const h = w.handle();
-  w.g(0, type); w.g(5, h); w.g(330, owner); w.g(100, 'AcDbEntity'); colorTags(ctx, e); if (sub) w.g(100, sub);
+  const w = ctx.w; const h = w.handle(); const top = ctx.handles && e.id && owner === ctx.msOwner; if (top) ctx.handles.set(e.id, h);
+  w.g(0, type); w.g(5, h);
+  const rs = top && ctx.reactors ? ctx.reactors.get(e.id) : null;
+  if (rs) { w.g(102, '{ACAD_REACTORS'); for (const r of rs) w.g(330, r); w.g(102, '}'); }
+  w.g(330, owner); w.g(100, 'AcDbEntity'); colorTags(ctx, e); if (sub) w.g(100, sub);
   return h;
 }
 function writeEnt(ctx, e, owner) {
@@ -670,20 +695,23 @@ function writeEnt(ctx, e, owner) {
 function writeDim(ctx, e, owner) {
   // a entidade DIMENSION referencia um bloco anônimo *D com a geometria (gerado em prepareDimBlocks)
   const w = ctx.w;
-  const dt = { LIN: 0, ALI: 1, ANG: 5, DIA: 3, RAD: 4, ORD: 6, ARCD: 0 }[e.dtype] ?? 0;
-  const bname = ctx.dimBlocks?.get(e) || null;
+  const dt = { LIN: 0, ALI: 1, ANG: 5, DIA: 3, RAD: 4, ORD: 6, ARCD: 0, ARCL: 0 }[e.dtype] ?? 0;
+  const bname0 = ctx.dimBlocks?.get(e) || null;
+  if (e.dtype === 'ARCL') e = { ...e, p1: G.polar(e.c, e.sa, e.r), p2: G.polar(e.c, e.ea, e.r), rot: G.angle(G.polar(e.c, e.sa, e.r), G.polar(e.c, e.ea, e.r)) };
+  const bname = bname0;
   head(ctx, e, 'DIMENSION', owner, 'AcDbDimension');
   if (bname) w.g(2, bname);
   const dp = e.dp || e.c || e.p1 || P(0, 0);
-  if (e.dtype === 'RAD') w.pt(10, e.c); else if (e.dtype === 'DIA') w.pt(10, e.p1); else w.pt(10, dp);
+  if (e.dtype === 'RAD') w.pt(10, e.c); else if (e.dtype === 'DIA') w.pt(10, e.p1); else if (e.dtype === 'ORD') w.pt(10, e.org || P(0, 0)); else w.pt(10, dp);
   const meas = T.DIMENSION.info(e)['Medida'];
   const tp = e.tp || dp;
   w.pt(11, tp);
-  w.g(70, dt | (e.tp ? 128 : 0) | (bname ? 32 : 0)); w.g(1, e.text && e.text !== '<>' ? encodeStr(e.text) : ''); w.g(3, 'Standard');
+  w.g(70, dt | (e.tp ? 128 : 0) | (bname ? 32 : 0) | (e.dtype === 'ORD' && e.xaxis ? 64 : 0)); w.g(1, e.text && e.text !== '<>' ? encodeStr(e.text) : ''); w.g(3, 'Standard');
   if (dt === 0 || dt === 1) { w.g(100, 'AcDbAlignedDimension'); w.pt(13, e.p1); w.pt(14, e.p2); if (dt === 0) { w.g(50, (e.rot || 0) * R2D); w.g(100, 'AcDbRotatedDimension'); } }
   else if (dt === 5) { w.g(100, 'AcDb3PointAngularDimension'); w.pt(13, e.p1); w.pt(14, e.p2); w.pt(15, e.c); }
   else if (dt === 3) { w.g(100, 'AcDbDiametricDimension'); w.pt(15, e.p2); w.g(40, 0); }
   else if (dt === 4) { w.g(100, 'AcDbRadialDimension'); w.pt(15, e.p); w.g(40, 0); }
+  else if (dt === 6) { w.g(100, 'AcDbOrdinateDimension'); w.pt(13, e.p1); w.pt(14, e.p2); }
   void meas;
 }
 function writeHatch(ctx, e, owner) {

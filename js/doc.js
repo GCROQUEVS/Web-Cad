@@ -52,7 +52,8 @@ export class Doc {
     this.blocks = new Map();
     this.ltypes = new Map(Object.entries(LINETYPES).map(([k, v]) => [k, { name: k, ...v }]));
     this.dimstyle = { name: 'STANDARD', dimtxt: 2.5, dimasz: 2.5, dimexo: 0.625, dimexe: 1.25, dimgap: 0.625, dimdec: 2, dimadec: 0, dimscale: 1, dimlfac: 1 };
-    this.header = { ltscale: 1, insunits: 4, textsize: 2.5, lunits: 2, luprec: 4 };
+    this.header = { ltscale: 1, insunits: 4, textsize: 2.5, lunits: 2, luprec: 4, pdmode: 0, pdsize: 0, font: 'Arial' };
+    this.groups = new Map(); // nome -> {name, desc, ids:Set}
     this.curLayer = '0';
     this.textStyle = { name: 'Standard', font: 'Arial' };
     this.undoStack = []; this.redoStack = []; this.tx = null;
@@ -114,10 +115,11 @@ export class Doc {
     });
   }
   tablesChanged() { if (this.tx && !this.tx.tables) this.tx.tables = { before: this.snapTables() }; }
-  snapTables() { return JSON.stringify({ layers: [...this.layers.values()], blocks: [...this.blocks.values()].map((b) => ({ ...b, ents: b.ents.map(cloneEnt) })), dimstyle: this.dimstyle, header: this.header, curLayer: this.curLayer }); }
+  snapTables() { return JSON.stringify({ layers: [...this.layers.values()], blocks: [...this.blocks.values()].map((b) => ({ ...b, ents: b.ents.map(cloneEnt) })), dimstyle: this.dimstyle, header: this.header, curLayer: this.curLayer, groups: [...this.groups.values()].map((g) => ({ ...g, ids: [...g.ids] })) }); }
   restoreTables(s) {
     const o = JSON.parse(s); this.layers = new Map(o.layers.map((l) => [l.name, l]));
     this.blocks = new Map(o.blocks.map((b) => [b.name, b])); this.dimstyle = o.dimstyle; this.header = o.header; this.curLayer = o.curLayer; this._bbCache.clear();
+    this.groups = new Map((o.groups || []).map((g) => [g.name, { ...g, ids: new Set(g.ids) }]));
     for (const e of this.ents.values()) if (e.type === 'INSERT' || e.type === 'DIMENSION') this._reindex(e);
   }
   undo() {
@@ -161,7 +163,7 @@ export class Doc {
     for (const id of ids) { const e = this.ents.get(id); if (e && G.bbOverlap(this.bbox(e), bb)) out.push(e); else if (e && T[e.type]?.infinite) out.push(e); }
     return out;
   }
-  visible(e) { const L = this.layers.get(e.layer); return !L || (L.on && !L.frozen); }
+  visible(e) { if (this.hidden && this.hidden.has(e.id)) return false; const L = this.layers.get(e.layer); return !L || (L.on && !L.frozen); }
   extents(onlyVisible = true) {
     const b = G.bbEmpty();
     for (const e of this.ents.values()) { if (onlyVisible && !this.visible(e)) continue; if (T[e.type]?.infinite) continue; const bb = this.bbox(e); if (G.bbValid(bb)) G.bbUnion(b, bb); }

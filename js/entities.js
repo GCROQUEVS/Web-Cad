@@ -3,9 +3,13 @@ import * as G from './geom.js';
 const { P, add, sub, mul, dist, angle, polar, mid, M, ap, apv, bbEmpty, bbAdd, bbArc, TAU } = G;
 
 let measureCtx = null;
-export const FONT = 'Arial, Helvetica, sans-serif';
+export let FONT = 'Arial, Helvetica, sans-serif';
 export const CAP = 0.716; // altura de maiúscula / tamanho da fonte
 const wcache = new Map();
+export function setFont(name) {
+  const fam = { Arial: 'Arial, Helvetica, sans-serif', 'Arial Narrow': '"Arial Narrow", "Roboto Condensed", Arial, sans-serif', 'Times New Roman': '"Times New Roman", Times, serif', 'Courier New': '"Courier New", Courier, monospace', Verdana: 'Verdana, Geneva, sans-serif', 'Segoe UI': '"Segoe UI", Roboto, sans-serif', ISOCP: '"Osifont", "Arial Narrow", Arial, sans-serif' }[name] || 'Arial, Helvetica, sans-serif';
+  FONT = fam; wcache.clear(); if (measureCtx) measureCtx.font = `100px ${FONT}`;
+}
 export function textWidth(str, h) {
   let w = wcache.get(str);
   if (w === undefined) {
@@ -361,6 +365,7 @@ T.SPLINE = {
   length: (e) => { const p = T.SPLINE.pts(e); let s = 0; for (let i = 1; i < p.length; i++) s += dist(p[i - 1], p[i]); return s; },
 };
 T.POINT = {
+  fill: true,
   bbox: (e) => bbAdd(bbEmpty(), e.p),
   prims: (e) => [{ k: 'L', a: e.p, b: e.p }],
   path: (c, e, px) => { const s = 3 * px; c.moveTo(e.p.x - s, e.p.y); c.lineTo(e.p.x + s, e.p.y); c.moveTo(e.p.x, e.p.y - s); c.lineTo(e.p.x, e.p.y + s); },
@@ -499,6 +504,8 @@ export function dimMeasure(e) {
     case 'ALI': return dist(e.p1, e.p2);
     case 'RAD': return dist(e.c, e.p);
     case 'DIA': return dist(e.p1, e.p2);
+    case 'ORD': return e.xaxis ? e.p1.x - (e.org ? e.org.x : 0) : e.p1.y - (e.org ? e.org.y : 0);
+    case 'ARCL': return e.r * G.arcSweep(e.sa, e.ea);
     case 'ANG': { let a1 = angle(e.c, e.p1), a2 = angle(e.c, e.p2); let sw = G.arcSweep(a1, a2); if (e.dp) { const ad = angle(e.c, e.dp); if (!G.angInArc(ad, a1, a2)) sw = TAU - sw; } return sw; }
   }
   return 0;
@@ -507,7 +514,7 @@ export function dimText(e, ds) {
   const m = dimMeasure(e) * (e.dtype === 'ANG' ? 1 : (ds.dimlfac || 1));
   let s = e.dtype === 'ANG' ? G.fmt(G.deg(m), ds.dimadec ?? 0) + '°' : G.fmt(m, ds.dimdec ?? 2);
   if (e.dtype !== 'ANG' && ds.dimzin_keep) s = m.toFixed(ds.dimdec ?? 2);
-  if (e.dtype === 'RAD') s = 'R' + s; if (e.dtype === 'DIA') s = 'Ø' + s;
+  if (e.dtype === 'RAD') s = 'R' + s; if (e.dtype === 'DIA') s = 'Ø' + s; if (e.dtype === 'ARCL') s = '⌒' + s;
   if (e.text && e.text !== '<>') return cleanText(e.text.replace('<>', s));
   return s;
 }
@@ -554,6 +561,22 @@ export function dimGeom(e, ds) {
     const tpos = outside ? polar(land, right ? 0 : Math.PI, tw / 2 + gap) : tp;
     out.push({ type: 'MTEXT', p: outside ? add(tpos, P(0, -txt / 2)) : tpos, h: txt, rot: 0, str, attach: outside ? 8 : 5, w: 0 });
     if (outside) out[out.length - 1].attach = 5, out[out.length - 1].p = tpos;
+  } else if (e.dtype === 'ORD') {
+    const a = e.p1, b = e.p2; const off = exo;
+    const k = e.xaxis ? P(a.x, a.y + Math.sign(b.y - a.y || 1) * off) : P(a.x + Math.sign(b.x - a.x || 1) * off, a.y);
+    // linha de chamada com dobra
+    const mid1 = e.xaxis ? P(a.x, b.y - Math.sign(b.y - a.y || 1) * asz * 2) : P(b.x - Math.sign(b.x - a.x || 1) * asz * 2, a.y);
+    L(k, mid1); L(mid1, b);
+    const tw2 = tw + gap * 2;
+    if (e.xaxis) out.push({ type: 'MTEXT', p: polar(b, Math.sign(b.y - a.y || 1) > 0 ? Math.PI / 2 : -Math.PI / 2, tw2 / 2), h: txt, rot: Math.PI / 2, str, attach: 5, w: 0 });
+    else { const right = b.x >= a.x; out.push({ type: 'MTEXT', p: P(b.x + (right ? gap : -gap), b.y), h: txt, rot: 0, str, attach: right ? 4 : 6, w: 0 }); }
+  } else if (e.dtype === 'ARCL') {
+    const c = e.c, r = dist(c, e.dp), sa = e.sa, ea = e.ea;
+    out.push({ type: 'ARC', c, r, sa, ea });
+    for (const a of [sa, ea]) { const p0 = polar(c, a, e.r); const dd = r > e.r ? 1 : -1; L(polar(c, a, e.r + dd * exo), polar(c, a, r + dd * exe)); void p0; }
+    out.push(arrow(polar(c, sa, r), sa - Math.PI / 2, asz)); out.push(arrow(polar(c, ea, r), ea + Math.PI / 2, asz));
+    const am = sa + G.arcSweep(sa, ea) / 2;
+    addText(polar(c, am, r + gap + txt / 2), am - Math.PI / 2); out[out.length - 1].attach = 5;
   } else if (e.dtype === 'ANG') {
     const c = e.c; const r = dist(c, e.dp);
     let a1 = angle(c, e.p1), a2 = angle(c, e.p2);
@@ -593,10 +616,12 @@ T.DIMENSION = {
   },
   snaps: (e) => { const s = []; for (const k of ['p1', 'p2', 'dp', 'c', 'p']) if (e[k]) s.push({ p: e[k], k: k === 'c' ? 'cen' : 'nod' }); return s; },
   grips: (e) => { const g = []; for (const k of ['p1', 'p2', 'c', 'p', 'dp', 'tp']) if (e[k]) g.push(e[k]); return g; },
+  // (ORD: p1 = ponto, p2 = fim da chamada; ARCL: c, r, sa, ea do arco + dp)
   setGrip: (e, i, p) => { const ks = ['p1', 'p2', 'c', 'p', 'dp', 'tp'].filter((k) => e[k]); e[ks[i]] = p; e.block = null; },
   transform: (e, m) => {
     for (const k of ['p1', 'p2', 'dp', 'c', 'p', 'tp']) if (e[k]) e[k] = ap(m, e[k]);
     if (e.dtype === 'LIN') { const d = apv(m, P(Math.cos(e.rot || 0), Math.sin(e.rot || 0))); e.rot = Math.atan2(d.y, d.x); }
+    if (e.dtype === 'ARCL') { const t = trArc(m, e.c, e.r, e.sa, e.ea); e.r = t.r; e.sa = t.sa; e.ea = t.ea; }
     if (e.block) { e._bm = M.mul(m, e._bm || M.id()); }
   },
   explode: (e, base, doc) => {
@@ -608,6 +633,7 @@ T.DIMENSION = {
   props: [['text', 'text', 'Texto (<> = medida)']],
 };
 T.IMAGE = {
+  fill: true,
   bbox: (e) => e.pts.reduce((b, p) => bbAdd(b, p), bbEmpty()),
   prims: (e) => ptsToLines(e.pts, true),
   path: (c, e) => loopPath(c, e.pts, true),

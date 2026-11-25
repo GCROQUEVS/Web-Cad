@@ -275,6 +275,7 @@ export function registerCommands(app, ui) {
     if (opt.color != null) e.color = opt.color;
     app.addEnt(e);
   }, 'Hachura');
+  app.pickLoops = (mode) => pickLoops(mode);
   async function pickLoops(mode) {
     if (mode === 'select') {
       const sel = await app.getSelection('Selecione objetos de contorno fechados:');
@@ -901,7 +902,7 @@ export function registerCommands(app, ui) {
   // ============ VISTA ============
   R('ZOOM', ['Z'], async () => {
     const k = await app.getPoint('Canto da janela, fator de escala (nX) ou [Extensão/Janela/Anterior/Tudo/Objeto] <tempo real>:', { keywords: ['Extensão', 'Janela', 'Anterior', 'Tudo', 'Objeto'], rubber: false, zoomFactor: true });
-    if (k && k.factor) { app.pushView(); app.zoomAt(k.factor, P(app.W / 2, app.H / 2)); return; }
+    if (k && k.factor) { app.pushView(); app.zoomAt(k.factor, P(app.vp.x + app.vp.w / 2, app.vp.y + app.vp.h / 2)); return; }
     if (k === 'Extensão' || k === 'Tudo') return app.zoomExtents();
     if (k === 'Anterior') return app.zoomPrev();
     if (k === 'Objeto') { const s = await app.getSelection(); if (s.length) app.zoomBB(s.reduce((b, e) => G.bbUnion(b, doc().bbox(e)), G.bbEmpty())); return; }
@@ -928,7 +929,8 @@ export function registerCommands(app, ui) {
   }, 'Colar', { noRepeat: true });
 
   // ============ CONFIGURAÇÕES ============
-  R('LAYER', ['LA', 'CAMADA'], async () => ui.layerDialog(), 'Gerenciador de camadas', { noTx: true });
+  R('LAYER', ['LA', 'CAMADA'], async () => ui.toggleLayerPalette(), 'Gerenciador de propriedades de camadas (paleta)', { noTx: true });
+  R('LAYERDIALOG', [], async () => ui.layerDialog(), 'Gerenciador de camadas (janela)', { noTx: true });
   R('OSNAP', ['OS', 'DSETTINGS', 'DS', 'SE'], async () => ui.settingsDialog(), 'Configurações de desenho (osnap, grade, polar)', { noTx: true });
   R('UNITS', ['UN', 'UNIDADES'], async () => ui.unitsDialog(), 'Unidades e precisão', { noTx: true });
   R('LTSCALE', ['LTS'], async () => { const v = await app.getNumber(`Novo fator de escala de tipo de linha <${f(doc().header.ltscale)}>:`, { default: doc().header.ltscale }); if (v > 0) { doc().tablesChanged(); doc().header.ltscale = v; app.redraw(); } }, 'Escala de tipo de linha');
@@ -955,7 +957,7 @@ export function registerCommands(app, ui) {
   R('EXPORT', ['EXP', 'EXPORTAR'], async () => ui.exportDialog(), 'Exportar (DXF, SVG, PDF, PNG)', { noTx: true, noRepeat: true });
   R('PLOT', ['PRINT', 'IMPRIMIR'], async () => ui.plotDialog(), 'Plotar / imprimir em PDF', { noTx: true, noRepeat: true });
   R('HELP', ['AJUDA', '?'], async () => ui.helpDialog(), 'Ajuda', { noTx: true, noRepeat: true });
-  R('PROPERTIES', ['PR', 'PROPRIEDADES', 'CH', 'MO'], async () => ui.showProps(), 'Paleta de propriedades', { noTx: true, noRepeat: true });
+  R('PROPERTIES', ['PR', 'PROPRIEDADES', 'CH', 'MO'], async () => ui.showProps(true), 'Paleta de propriedades', { noTx: true, noRepeat: true });
   R('TEXTEDIT', ['ED', 'DDEDIT'], async () => { const s = await app.getEntity('Selecione texto ou cota:', { filter: (e) => ['TEXT', 'MTEXT', 'DIMENSION', 'ATTRIB', 'ATTDEF'].includes(e.type) }); if (s) await ui.editText(s.e); }, 'Editar texto');
 }
 export { textCorners, HATCH_PATTERNS };

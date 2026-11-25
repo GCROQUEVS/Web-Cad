@@ -14,7 +14,9 @@ export class App {
   constructor(root) {
     this.root = root;
     this.doc = new Doc();
-    this.view = { cx: 0, cy: 0, scale: 4 }; // scale = px CSS por unidade
+    // janelas de visualização (viewports): cada uma com sua vista; ai = ativa
+    this.vps = [{ x: 0, y: 0, w: 1, h: 1, view: { cx: 0, cy: 0, scale: 4 } }]; this.ai = 0; this.layout = 'single';
+    this.inputQueue = [];
     this.viewStack = [];
     this.sel = new Set();
     this.cursor = P(0, 0); this.cursorScreen = P(-100, -100); this.rawCursor = P(0, 0);
@@ -55,14 +57,58 @@ export class App {
     this.dpr = window.devicePixelRatio || 1;
     this.W = Math.max(1, r.width); this.H = Math.max(1, r.height);
     for (const c of [this.cScene, this.cSel, this.cOver]) { c.width = Math.round(this.W * this.dpr); c.height = Math.round(this.H * this.dpr); c.style.width = this.W + 'px'; c.style.height = this.H + 'px'; }
+    this.setLayout(this.layout, true);
     this.sceneDocDirty = true; this.redraw();
   }
+  get view() { return this.vps[this.ai].view; }
+  set view(v) { this.vps[this.ai].view = v; }
+  get vp() { return this.vps[this.ai]; }
+  // configurações de janelas: single, v2 (2 verticais), h2 (2 horizontais), three (1 grande + 2), four
+  setLayout(name, keep) {
+    const W = this.W, H = this.H, w2 = Math.floor(W / 2), h2 = Math.floor(H / 2);
+    const R = {
+      single: [[0, 0, W, H]], v2: [[0, 0, w2, H], [w2, 0, W - w2, H]], h2: [[0, 0, W, h2], [0, h2, W, H - h2]],
+      three: [[0, 0, w2, H], [w2, 0, W - w2, h2], [w2, h2, W - w2, H - h2]], four: [[0, 0, w2, h2], [w2, 0, W - w2, h2], [0, h2, w2, H - h2], [w2, h2, W - w2, H - h2]],
+    }[name] || [[0, 0, W, H]];
+    const old = this.vps, act = this.view;
+    const oldRect = old[this.ai];
+    this.vps = R.map(([x, y, w, h], i) => {
+      let view = old[i] ? old[i].view : { ...act };
+      if (!keep && old[i] && old[i].w > 1) { const k = Math.min(w / old[i].w, h / old[i].h); view = { ...view, scale: view.scale * (k > 0 ? k : 1) }; }
+      return { x, y, w: Math.max(1, w), h: Math.max(1, h), view };
+    });
+    void oldRect;
+    if (this.ai >= this.vps.length) this.ai = 0;
+    this.layout = name; this.backView = null; this.sceneDocDirty = true; this.redraw();
+  }
+  vpAt(sp) { for (let i = 0; i < this.vps.length; i++) { const v = this.vps[i]; if (sp.x >= v.x && sp.x < v.x + v.w && sp.y >= v.y && sp.y < v.y + v.h) return i; } return this.ai; }
+  // executa fn em cada janela (com recorte) e restaura a ativa
+  eachVp(c, fn) {
+    const keep = this.ai, d = this.dpr;
+    for (let i = 0; i < this.vps.length; i++) {
+      this.ai = i; const v = this.vps[i];
+      c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.beginPath(); c.rect(v.x * d, v.y * d, v.w * d, v.h * d); c.clip();
+      try { fn(i); } finally { c.restore(); }
+    }
+    this.ai = keep;
+  }
+  // troca o desenho ativo (abas de arquivos)
+  switchDoc(doc, state) {
+    if (this.pending) { const p = this.pending; this.pending = null; p.reject(new Cancel()); }
+    this.doc = doc; this.sel = new Set(); this.hover = null; this.preview = []; this.hotGrip = null; this.trackPts = []; this.viewStack = [];
+    if (state && state.vps) { this.layout = state.layout || 'single'; this.vps = state.vps.map((v) => ({ ...v, view: { ...v.view } })); this.ai = Math.min(state.ai || 0, this.vps.length - 1); this.setLayout(this.layout, true); }
+    this.lastVersion = -1; this.backView = null; this.sceneDocDirty = true; this.redraw();
+    this.onSelChange && this.onSelChange();
+  }
+  viewState() { return { layout: this.layout, ai: this.ai, vps: this.vps.map((v) => ({ ...v, view: { ...v.view } })) }; }
+  // executa um comando e responde automaticamente aos primeiros prompts (variantes da faixa de opções)
+  runWith(cmd, ...inputs) { this.inputQueue = inputs.slice(); this.runImmediate(cmd); }
   redraw() { this.dirty.scene = this.dirty.sel = this.dirty.over = true; }
   // ---------------- vista ----------------
-  w2s(p) { return P((p.x - this.view.cx) * this.view.scale + this.W / 2, (this.view.cy - p.y) * this.view.scale + this.H / 2); }
-  s2w(p) { return P((p.x - this.W / 2) / this.view.scale + this.view.cx, this.view.cy - (p.y - this.H / 2) / this.view.scale); }
-  devMatrix() { const s = this.view.scale * this.dpr; return [s, 0, 0, -s, (this.W / 2 - this.view.cx * this.view.scale) * this.dpr, (this.H / 2 + this.view.cy * this.view.scale) * this.dpr]; }
-  viewBB() { const a = this.s2w(P(0, this.H)), b = this.s2w(P(this.W, 0)); return { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }; }
+  w2s(p) { const v = this.vp, w = v.view; return P((p.x - w.cx) * w.scale + v.x + v.w / 2, (w.cy - p.y) * w.scale + v.y + v.h / 2); }
+  s2w(p) { const v = this.vp, w = v.view; return P((p.x - v.x - v.w / 2) / w.scale + w.cx, w.cy - (p.y - v.y - v.h / 2) / w.scale); }
+  devMatrix() { const v = this.vp, w = v.view, s = w.scale * this.dpr; return [s, 0, 0, -s, (v.x + v.w / 2 - w.cx * w.scale) * this.dpr, (v.y + v.h / 2 + w.cy * w.scale) * this.dpr]; }
+  viewBB() { const v = this.vp; const a = this.s2w(P(v.x, v.y + v.h)), b = this.s2w(P(v.x + v.w, v.y)); return { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }; }
   pushView() { this.viewStack.push({ ...this.view }); if (this.viewStack.length > 50) this.viewStack.shift(); }
   zoomAt(f, sp) {
     const w = this.s2w(sp);
@@ -74,11 +120,11 @@ export class App {
     if (!G.bbValid(bb)) return;
     this.pushView();
     const w = Math.max(bb.maxX - bb.minX, 1e-6), h = Math.max(bb.maxY - bb.minY, 1e-6);
-    this.view.scale = Math.min(this.W / w, this.H / h) * (1 - 2 * margin);
+    this.view.scale = Math.min(this.vp.w / w, this.vp.h / h) * (1 - 2 * margin);
     if (!isFinite(this.view.scale) || this.view.scale <= 0) this.view.scale = 1;
     this.view.cx = (bb.minX + bb.maxX) / 2; this.view.cy = (bb.minY + bb.maxY) / 2; this.redraw();
   }
-  zoomExtents() { const bb = this.doc.extents(); if (G.bbValid(bb)) this.zoomBB(bb); else { this.view = { cx: 50, cy: 50, scale: Math.min(this.W, this.H) / 120 }; this.redraw(); } }
+  zoomExtents() { const bb = this.doc.extents(); if (G.bbValid(bb)) this.zoomBB(bb); else { this.view = { cx: 50, cy: 50, scale: Math.min(this.vp.w, this.vp.h) / 120 }; this.redraw(); } }
   zoomPrev() { const v = this.viewStack.pop(); if (v) { this.view = v; this.redraw(); } }
   pxw(px = 1) { return px / this.view.scale; }
   // ---------------- laço de render ----------------
@@ -87,7 +133,7 @@ export class App {
     if (this.doc.version !== this.lastVersion) { this.lastVersion = this.doc.version; this.dirty.scene = this.dirty.sel = true; this.sceneDocDirty = true; this.onDocChange && this.onDocChange(); }
     if (this.dirty.scene) {
       this.dirty.scene = false;
-      const viewOnly = !this.sceneDocDirty && this.backView && this.lastRenderMs > 18;
+      const viewOnly = !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1;
       this.sceneDocDirty = false;
       if (viewOnly) { this.blitScene(); clearTimeout(this._fullT); this._fullT = setTimeout(() => { this.renderScene(); this.dirty.sel = true; }, 150); }
       else { clearTimeout(this._fullT); this.renderScene(); }
@@ -114,30 +160,34 @@ export class App {
   renderTo(c) {
     const t0 = performance.now();
     c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.bg; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
-    if (this.settings.grid) this.drawGrid(c);
-    const r = new Renderer(c, this.doc, { dark: this.isDark(), lwt: this.settings.lwt, dpr: this.dpr, bg: this.settings.bg });
-    c.lineCap = 'round'; c.lineJoin = 'round';
-    const n = renderDoc(r, this.doc, this.devMatrix(), this.viewBB());
+    let n = 0;
+    this.eachVp(c, () => {
+      if (this.settings.grid) this.drawGrid(c);
+      const r = new Renderer(c, this.doc, { dark: this.isDark(), lwt: this.settings.lwt, dpr: this.dpr, bg: this.settings.bg });
+      c.lineCap = 'round'; c.lineJoin = 'round';
+      n += renderDoc(r, this.doc, this.devMatrix(), this.viewBB());
+    });
     this.lastRenderMs = performance.now() - t0; this.lastRenderCount = n;
   }
   drawGrid(c) {
     let sp = this.settings.gridSpacing; while (sp * this.view.scale < 8) sp *= 5;
-    const bb = this.viewBB(); const d = this.dpr;
+    const bb = this.viewBB(); const d = this.dpr; const V = this.vp;
     c.setTransform(1, 0, 0, 1, 0, 0);
     const major = this.isDark() ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.12)', minor = this.isDark() ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.05)';
     for (const [step, col] of [[sp, minor], [sp * 5, major]]) {
       c.beginPath(); c.strokeStyle = col; c.lineWidth = 1;
-      for (let x = Math.ceil(bb.minX / step) * step; x <= bb.maxX; x += step) { const s = this.w2s(P(x, 0)); const X = Math.round(s.x * d) + 0.5; c.moveTo(X, 0); c.lineTo(X, this.H * d); }
-      for (let y = Math.ceil(bb.minY / step) * step; y <= bb.maxY; y += step) { const s = this.w2s(P(0, y)); const Y = Math.round(s.y * d) + 0.5; c.moveTo(0, Y); c.lineTo(this.W * d, Y); }
+      for (let x = Math.ceil(bb.minX / step) * step; x <= bb.maxX; x += step) { const s = this.w2s(P(x, 0)); const X = Math.round(s.x * d) + 0.5; c.moveTo(X, V.y * d); c.lineTo(X, (V.y + V.h) * d); }
+      for (let y = Math.ceil(bb.minY / step) * step; y <= bb.maxY; y += step) { const s = this.w2s(P(0, y)); const Y = Math.round(s.y * d) + 0.5; c.moveTo(V.x * d, Y); c.lineTo((V.x + V.w) * d, Y); }
       c.stroke();
     }
     // eixos
-    c.beginPath(); c.strokeStyle = 'rgba(200,80,80,0.35)'; const o = this.w2s(P(0, 0)); c.moveTo(0, o.y * d); c.lineTo(this.W * d, o.y * d); c.stroke();
-    c.beginPath(); c.strokeStyle = 'rgba(80,200,80,0.35)'; c.moveTo(o.x * d, 0); c.lineTo(o.x * d, this.H * d); c.stroke();
+    c.beginPath(); c.strokeStyle = 'rgba(200,80,80,0.35)'; const o = this.w2s(P(0, 0)); c.moveTo(V.x * d, o.y * d); c.lineTo((V.x + V.w) * d, o.y * d); c.stroke();
+    c.beginPath(); c.strokeStyle = 'rgba(80,200,80,0.35)'; c.moveTo(o.x * d, V.y * d); c.lineTo(o.x * d, (V.y + V.h) * d); c.stroke();
   }
   renderSel() {
     const c = this.ctxSel; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.cSel.width, this.cSel.height);
     if (!this.sel.size) return;
+    this.eachVp(c, () => {
     const r = new Renderer(c, this.doc, { dark: this.isDark(), dpr: this.dpr, mono: '#4da3ff', forcedWidth: 2 * this.dpr, lodPx: 0 });
     c.globalAlpha = 0.9;
     const Tm = this.devMatrix(), vb = this.viewBB();
@@ -159,23 +209,32 @@ export class App {
         }
       }
     }
+      });
   }
   renderOver() {
     const c = this.ctxOver, d = this.dpr; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.cOver.width, this.cOver.height);
     const dark = this.isDark(); const fg = dark ? '#ffffff' : '#000000';
     // pré-visualização
-    if (this.preview && this.preview.length) {
-      const r = new Renderer(c, this.doc, { dark, dpr: d, lodPx: 0 });
-      r.ctx.beginPath(); r.key = null;
-      const Tm = this.devMatrix(), vb = this.viewBB();
-      for (const e of this.preview) { this.doc.defaults(e); r.drawEnt(e, Tm, null, vb); }
-      r.flush();
+    this.eachVp(c, () => {
+      if (this.preview && this.preview.length) {
+        const r = new Renderer(c, this.doc, { dark, dpr: d, lodPx: 0 });
+        r.ctx.beginPath(); r.key = null;
+        const Tm = this.devMatrix(), vb = this.viewBB();
+        for (const e of this.preview) { this.doc.defaults(e); r.drawEnt(e, Tm, null, vb); }
+        r.flush();
+      }
+      if (this.hover && !this.selWin) {
+        const r = new Renderer(c, this.doc, { dark, dpr: d, mono: dark ? '#9fd0ff' : '#0050c0', forcedWidth: 2.5 * d, lodPx: 0 });
+        r.ctx.beginPath(); r.key = null; r.drawEnt(this.hover, this.devMatrix(), null, this.viewBB()); r.flush();
+      }
+    });
+    if (this.vps.length > 1) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      this.vps.forEach((v, i) => { if (i === this.ai) return; c.strokeStyle = 'rgba(160,170,185,0.55)'; c.lineWidth = d; c.strokeRect(v.x * d + 0.5, v.y * d + 0.5, v.w * d - 1, v.h * d - 1); });
+      const v = this.vp; c.strokeStyle = '#3d8ee6'; c.lineWidth = 2 * d; c.strokeRect(v.x * d + d, v.y * d + d, v.w * d - 2 * d, v.h * d - 2 * d);
     }
-    // hover
-    if (this.hover && !this.selWin) {
-      const r = new Renderer(c, this.doc, { dark, dpr: d, mono: dark ? '#9fd0ff' : '#0050c0', forcedWidth: 2.5 * d, lodPx: 0 });
-      r.ctx.beginPath(); r.key = null; r.drawEnt(this.hover, this.devMatrix(), null, this.viewBB()); r.flush();
-    }
+    // a partir daqui só na janela ativa
+    c.save(); { const v = this.vp; c.beginPath(); c.rect(v.x * d, v.y * d, v.w * d, v.h * d); c.clip(); }
     c.setTransform(1, 0, 0, 1, 0, 0); c.setLineDash([]);
     // janela de seleção
     if (this.selWin) {
@@ -233,6 +292,7 @@ export class App {
         this.drawTip(c, s.x + 18, s.y + 22, (typed ? typed : info), txt);
       }
     }
+    c.restore();
   }
   drawTip(c, x, y, text, sub) {
     const d = this.dpr; c.font = `${12 * d}px Segoe UI, Arial`; c.textBaseline = 'middle';
@@ -406,7 +466,9 @@ export class App {
   }
   selectable(e) { const L = this.doc.layers.get(e.layer); return !L || !L.locked; }
   setSel(list) { this.sel = new Set(list); this.dirty.sel = true; this.onSelChange && this.onSelChange(); }
-  addSel(list, remove = false) { for (const e of list) { if (remove) this.sel.delete(e); else if (this.selectable(e)) this.sel.add(e); } this.dirty.sel = true; this.onSelChange && this.onSelChange(); }
+  addSel(list, remove = false) {
+    if (this.settings.pickstyle !== false && this.doc.groups && this.doc.groups.size) { const ex = []; for (const e of list) { ex.push(e); for (const g of this.doc.groups.values()) if (g.ids.has(e.id)) for (const id of g.ids) { const m = this.doc.ents.get(id); if (m && m !== e) ex.push(m); } } list = ex; }
+    for (const e of list) { if (remove) this.sel.delete(e); else if (this.selectable(e)) this.sel.add(e); } this.dirty.sel = true; this.onSelChange && this.onSelChange(); }
   clearSel() { if (this.sel.size) { this.sel.clear(); this.dirty.sel = true; this.onSelChange && this.onSelChange(); } }
   // ---------------- mouse ----------------
   bindMouse() {
@@ -418,12 +480,15 @@ export class App {
       ev.preventDefault();
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
       const f = Math.pow(1.0015, -ev.deltaY * (ev.deltaMode === 1 ? 30 : 1));
+      const vi = this.vpAt(sp); if (vi !== this.ai && !this.pending) { this.ai = vi; this.redraw(); }
       this.zoomAt(f, sp); this.updateCursor(sp);
     }, { passive: false });
     let panning = null, lastMid = 0;
     el.addEventListener('pointerdown', (ev) => {
       el.setPointerCapture(ev.pointerId);
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
+      if (this.dirty.move || !this.cursorScreen || this.cursorScreen.x !== sp.x || this.cursorScreen.y !== sp.y) { this.dirty.move = false; this.updateCursor(sp); }
+      if (this.vps.length > 1) { const vi = this.vpAt(sp); if (vi !== this.ai) { this.ai = vi; this.redraw(); this.updateCursor(sp); if (ev.button !== 1) return; } }
       if (ev.button === 1 || (ev.button === 0 && this.panMode)) {
         ev.preventDefault();
         const now = performance.now();
@@ -588,7 +653,8 @@ export class App {
       if (fk[k]) { ev.preventDefault(); if (k === 'F2') this.onToggleHist && this.onToggleHist(); else this.toggle(fk[k]); return; }
       if (ev.ctrlKey || ev.metaKey) {
         const key = k.toLowerCase();
-        const map = { z: 'U', y: 'REDO', s: ev.shiftKey ? 'SAVEAS' : 'QSAVE', o: 'OPEN', n: 'NEW', p: 'PLOT', a: 'SELECTALL', c: 'COPYCLIP', v: 'PASTECLIP', x: 'CUTCLIP' };
+        if (key === '9') { ev.preventDefault(); this.onToggleCmd && this.onToggleCmd(); return; }
+        const map = { 1: 'PROPERTIES', 3: 'LAYER', z: 'U', y: 'REDO', s: ev.shiftKey ? 'SAVEAS' : 'QSAVE', o: 'OPEN', n: 'NEW', p: 'PLOT', a: 'SELECTALL', c: 'COPYCLIP', v: 'PASTECLIP', x: 'CUTCLIP' };
         if (map[key]) { ev.preventDefault(); if (this.pending && (key === 'z' || key === 'y')) return; this.runImmediate(map[key]); }
         return;
       }
@@ -682,11 +748,13 @@ export class App {
   }
   echo(t) { this.onEcho && this.onEcho(t); }
   matchKeyword(t, kws) {
-    const u = t.toUpperCase();
+    const N = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    const u = N(t);
     const EN = { Fechar: 'Close', Desfazer: 'Undo', Arco: 'Arc', Linha: 'Line', Largura: 'Width', Centro: 'Center', Fim: 'End', 'Diâmetro': 'Diameter', Raio: 'Radius', Copiar: 'Copy', 'Referência': 'Reference', Sim: 'Yes', 'Não': 'No', 'Através': 'Through', Filete: 'Fillet', 'Dimensões': 'Dimensions', Aresta: 'Edge', Texto: 'Text', Horizontal: 'Horizontal', Vertical: 'Vertical', Rotacionado: 'Rotated', 'Ângulo': 'Angle', 'Extensão': 'Extents', Janela: 'Window', Anterior: 'Previous', Tudo: 'All', Objeto: 'Object', Polilinha: 'Polyline', 'Distância': 'Distance', Deslocamento: 'Displacement', Matriz: 'Array', Sair: 'Exit', Escala: 'Scale', 'Rotação': 'Rotate', Retangular: 'Rectangular', Polar: 'Polar', Abrir: 'Open', Juntar: 'Join', Inverter: 'Reverse', Decurvar: 'Decurve', Frente: 'Front', 'Trás': 'Back', Justificar: 'Justify', Delta: 'Delta', Total: 'Total', Hor: 'Hor', Ver: 'Ver', 'Âng': 'Ang' };
-    for (const k of kws) { const keys = [k.toUpperCase(), ...(k.match(/[A-ZÁÉÍÓÚÂÊÔÃÕÇ]+/g) || []).slice(0, 1)]; if (keys.includes(u)) return k; }
-    for (const k of kws) if (k.toUpperCase().startsWith(u)) return k;
-    for (const k of kws) { const en = EN[k]; if (en && en.toUpperCase().startsWith(u)) return k; }
+    const S = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    for (const k of kws) { const keys = [N(k), ...(S(k).match(/[A-Z0-9]+/g) || []).slice(0, 1)]; if (keys.includes(u)) return k; }
+    for (const k of kws) if (N(k).startsWith(u)) return k;
+    for (const k of kws) { const en = EN[k]; if (en && N(en).startsWith(u)) return k; }
     return null;
   }
   parseNumber(t) {
@@ -725,6 +793,14 @@ export class App {
     return new Promise((resolve, reject) => {
       this.pending = { kind, prompt, opts, resolve, reject };
       this.onPrompt && this.onPrompt(prompt, opts.keywords || []);
+      if (this.inputQueue && this.inputQueue.length) {
+        const q = this.inputQueue[0];
+        // string: responde já; {kw}: responde quando o prompt oferecer essa opção
+        if (typeof q === 'string' || (q && q.kw && (opts.keywords || []).includes(q.kw))) {
+          this.inputQueue.shift(); const pd = this.pending; const v = typeof q === 'string' ? q : q.kw;
+          setTimeout(() => { if (this.pending === pd) this.submit(v); }, 0);
+        }
+      }
       if (opts.preview) { try { this.preview = opts.preview(this.cursor) || []; } catch { this.preview = []; } }
       this.updateCursor(this.cursorScreen);
     });
@@ -787,7 +863,7 @@ export class App {
         if (err instanceof Cancel) this.msg('*Cancelado*', 'dim');
         else { console.error(err); this.msg('Erro: ' + (err.message || err), 'err'); }
       } finally {
-        if (!c.noTx) this.doc.commit(); this.preview = []; this.pending = null; this.oneShot = null; this.trackPts = [];
+        if (!c.noTx) this.doc.commit(); this.preview = []; this.inputQueue = []; this.pending = null; this.oneShot = null; this.trackPts = [];
         this.cmdRunning = null; this.dirty.sel = this.dirty.over = true; this.onPrompt && this.onPrompt(null);
       }
     })();

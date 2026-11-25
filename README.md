@@ -24,21 +24,35 @@ Também dá para publicar a pasta em qualquer hospedagem estática (GitHub Pages
 
 Ctrl+S grava direto no arquivo original quando o navegador suporta a File System Access API (Chrome/Edge). Também dá para arrastar e soltar arquivos na área de desenho.
 
+## Interface
+Interface no estilo dos programas CAD de mesa (tema escuro):
+- **Barra de título** com menu do aplicativo, barra de acesso rápido (novo, abrir, salvar, plotar, desfazer/refazer) e busca de comandos
+- **Faixa de opções** com as abas Início, Inserir, Anotar, Vista, Gerenciar e Saída. Os botões grandes e pequenos têm variantes (▾), e o título de cada painel abre mais ferramentas. Em telas estreitas, os painéis da direita se recolhem. Clique duplo numa aba minimiza a faixa.
+- **Abas de arquivos**: vários desenhos abertos ao mesmo tempo, mais a página Início
+- **Paleta do gerenciador de camadas** flutuante e arrastável (`LA`) e **paleta de propriedades** (`Ctrl+1`)
+- **Linha de comando flutuante** (`Ctrl+9` mostra/oculta, F2 abre o histórico)
+- **Barra de status** com ícones (grade, snap, orto, polar, rastreamento, osnap, espessura de linha, entrada dinâmica, seleção de grupo, isolar objetos, escala de anotação)
+- **Janelas de visualização** (1, 2, 3 ou 4 vistas lado a lado)
+
 ## Recursos
-- **Desenho:** LINE, PLINE (com arcos e largura), CIRCLE (centro/raio, diâmetro, 2P, 3P, TTR), ARC (3P, centro, fim+raio), RECTANG (com filete), POLYGON, ELLIPSE (inclusive arco elíptico), SPLINE, POINT, XLINE, RAY, DONUT, REVCLOUD, TEXT, MTEXT, HATCH (14 padrões + sólido; contorno por ponto interno com ilhas, ou por seleção de objetos), BOUNDARY
-- **Modificação:** MOVE, COPY (com matriz), ROTATE e SCALE (com Copiar/Referência), MIRROR, OFFSET (distância/através), TRIM e EXTEND (Shift alterna entre os dois), FILLET (linhas e polilinha), CHAMFER, ARRAY (retangular/polar), EXPLODE, JOIN, BREAK, BREAKATPOINT, STRETCH, LENGTHEN, ALIGN, MATCHPROP, PEDIT, DIVIDE, MEASURE, DRAWORDER, ERASE
-- **Cotas:** linear, alinhada, raio, diâmetro, angular, contínua, linha de base, chamada (leader), estilo de cota
-- **Blocos:** BLOCK, INSERT (com atributos), ATTDEF, WBLOCK; blocos e atributos importados do DXF/DWG
-- **Camadas:** gerenciador completo (ligar/desligar, congelar, bloquear, cor ACI ou RGB, tipo de linha, espessura, plotar); tipos de linha tracejados; espessuras de linha
-- **Precisão:** snaps de objeto (extremidade, ponto médio, centro, quadrante, interseção, perpendicular, tangente, mais próximo, nó, inserção, extensão), ORTO, rastreamento POLAR, grade e snap, entrada dinâmica, coordenadas absolutas/relativas/polares (`x,y`, `@dx,dy`, `@d<a`), entrada direta de distância, snaps pontuais (`END`, `MID`...)
-- **Edição:** seleção por janela e por cruzamento, grips (esticar/mover/rotacionar/escalar/espelhar), paleta de propriedades, desfazer/refazer ilimitado, área de transferência, menu de contexto
-- **Consulta:** DIST, AREA, ID, LIST, COUNT
+- **Desenho:** LINE, PLINE (com arcos e largura), CIRCLE (centro/raio, diâmetro, 2P, 3P, TTR), ARC (3P, início-centro-fim, início-fim-raio, centro-início-fim), RECTANG, POLYGON, ELLIPSE (inclusive arco elíptico), SPLINE, POINT (com estilo de ponto), XLINE, RAY, DONUT, REVCLOUD, WIPEOUT, TEXT, MTEXT, HATCH (14 padrões + sólido, contorno por ponto interno com ilhas), GRADIENT, BOUNDARY, TABLE (aceita colar do Excel)
+- **Modificação:** MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, TRIM/EXTEND, FILLET, CHAMFER, ARRAY (retangular, polar e em caminho), EXPLODE, JOIN, BREAK, BREAKATPOINT, STRETCH, LENGTHEN, ALIGN, MATCHPROP, PEDIT, DIVIDE, MEASURE, DRAWORDER, ERASE
+- **Cotas:** DIM (inteligente: detecta linha, arco ou círculo), linear, alinhada, angular, comprimento de arco, raio, diâmetro, coordenada, contínua, linha de base, chamada, estilo de cota, escala de anotação
+- **Blocos:** BLOCK, INSERT (com galeria e atributos), editor de bloco (BEDIT/BCLOSE), EATTEDIT, ATTDEF, WBLOCK, inserir arquivo DWG/DXF como bloco
+- **Camadas:** paleta completa e ferramentas LAYOFF, LAYISO, LAYUNISO, LAYFRZ, LAYLCK, LAYULK, LAYON, LAYTHW, LAYMCUR, LAYMCH, LAYCUR, LAYDEL
+- **Grupos:** GROUP, UNGROUP, seleção de grupo (gravados no DXF)
+- **Seleção e consulta:** janela/cruzamento, QSELECT, SELECTSIMILAR, ocultar/isolar objetos, MEASUREGEOM, DIST, AREA, ID, LIST, COUNT
+- **Texto:** estilo de texto (fonte), localizar e substituir
+- **Imagem:** anexar PNG/JPG como referência (IMAGEATTACH)
+- **Precisão:** snaps de objeto, ORTO, POLAR, rastreamento de snap (RASTR), grade e snap, entrada dinâmica, coordenadas `x,y`, `@dx,dy`, `@d<a`
+- **Gerenciar:** PURGE, AUDIT, UNITS, opções
 - **Desempenho:** índice espacial, cache de geometria, nível de detalhe e reaproveitamento de quadro durante pan/zoom. Testado com 200 mil objetos.
 
-Os comandos aceitam os nomes e atalhos do AutoCAD em inglês (L, C, TR, O...) e também nomes em português. Digite `AJUDA` (ou F1) para ver a lista completa.
+Os comandos aceitam os nomes e atalhos do AutoCAD em inglês e também nomes em português. Digite `AJUDA` (ou F1) para ver a lista.
 
 ## Limitações conhecidas
 - Gravar em DWG não é possível no navegador. O DXF gerado abre no AutoCAD, BricsCAD, DraftSight, LibreCAD e QCAD.
+- Imagens anexadas não vão para o DXF (só o contorno).
 - Só o espaço modelo: layouts/espaço papel, viewports, sólidos 3D/ACIS (REGION, 3DSOLID), MLINE e TOLERANCE são ignorados na importação.
 - Fontes SHX são substituídas por Arial.
 - As cotas e hachuras não são associativas.
