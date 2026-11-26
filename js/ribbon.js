@@ -49,6 +49,10 @@ const ICONS = {
   attedit: [['M4 6h16v12H4z', W], ['M7 10h6M7 14h10', B]], attdef: [['M4 6h16v12H4z', W], ['M8 10h8M12 10v6', Y]], wblock: [['M4 4h7v7H4z', W], ['M14 14h6v6h-6z', B], ['M11 11l4 4', Y]],
   matchprop: [['M14 4l6 6-8 8-6-6z', Y], ['M6 12l-3 9 9-3', W]], group: [['M4 4h7v7H4zM13 13h7v7h-7z', W], ['M2 2h20v20H2z', B]], ungroup: [['M4 4h7v7H4zM13 13h7v7h-7z', W], ['M2 2h8M14 22h8', B]], pickstyle: [['M3 3h18v18H3z', B], ['M8 8l8 4-4 1-1 4z', W]],
   area: [['M4 4l16 3-4 13L6 17z', W, 1.6, 'rgba(78,161,255,.3)']],
+  ai: [['M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z', Pk, 1.6, 'rgba(232,106,214,.3)'], ['M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z', B, 1.2], ['M5 2.5l.6 1.6 1.6.6-1.6.6L5 7l-.6-1.7L2.8 4.7l1.6-.6z', Y, 1]],
+  aiplan: [['M3 4h18v16H3z', W], ['M3 12h8M11 4v12M15 12h6M15 12v8', W], ['M17 3l.9 2.1L20 6l-2.1.9L17 9l-.9-2.1L14 6l2.1-.9z', Pk, 1.2]],
+  aichat: [['M4 5h16v11H9l-5 4z', W], ['M8 10h0M12 10h0M16 10h0', Pk, 3]],
+  key: [['M14 10a5 5 0 1 0-4 4.9V17h2v2h2v2h3v-3l-3.5-3.5', W], ['M9 9h0', Y, 3]],
   measure: [['M3 17L17 3l4 4L7 21z', W], ['M7 13l2 2M10 10l2 2M13 7l2 2', Y]], selectall: [['M3 3h18v18H3z', W], ['M7 7h10v10H7z', B, 0, 'rgba(78,161,255,.35)']], qselect: [['M3 3h12v12H3z', W], ['M10 10l10 4-4 2-2 4z', B]], id: [['M4 20L20 4', '#7c8696'], ['M12 12h0', Y, 5]],
   paste: [['M7 4h10v4H7z', W], ['M5 6h14v15H5z', W], ['M9 12h8M9 16h6', B]], cut: [['M6 18a2.5 2.5 0 1 0 .01 0M18 18a2.5 2.5 0 1 0 .01 0', W], ['M7.5 16L17 4M16.5 16L7 4', B]], copyclip: [['M8 8h12v12H8z', W], ['M4 16V4h12', B]], copybase: [['M8 8h12v12H8z', W], ['M4 16V4h12', B], ['M8 20h0', Y, 4]],
   vports: [['M3 4h18v16H3zM12 4v16M12 12h9', W], ['M3 4h9v16H3z', B, 0, 'rgba(78,161,255,.25)']], zoomext: [['M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6', W], ['M8 8h8v8H8z', B]], zoomwin: [['M10 10m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0', W], ['M15 15l6 6', B]], zoomprev: [['M10 10m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0', W], ['M7 10h6', B]], pan: [['M12 3v18M3 12h18', W], ['M9 6l3-3 3 3M9 18l3 3 3-3', B]],
@@ -189,6 +193,11 @@ export function buildChrome(ui) {
       { title: 'Limpeza', items: [big('purge', 'Limpar', run('PURGE')), big('audit', 'Auditar', run('AUDIT'))] },
       { title: 'Configurações', items: [big('settings', 'Configurações\nde desenho', run('OSNAP')), col(sm('units', 'Unidades', run('UNITS')), sm('options', 'Opções', run('OPTIONS')), sm('point', 'Estilo de ponto', run('DDPTYPE')))] },
       { title: 'Desenho', items: [col(sm('count', 'Contar objetos', run('COUNT')), sm('regen', 'Regenerar', run('REGEN')), sm('help', 'Comandos e atalhos', run('HELP')))] },
+    ] },
+    { id: 'ai', label: 'Assistente IA', panels: [
+      { title: 'Assistente', items: [big('aichat', 'Abrir\nassistente', () => ui.assistant.toggle()), col(sm('ai', 'Nova conversa', () => { ui.assistant.reset(); ui.assistant.show(); }), sm('key', 'Configurar IA', () => ui.assistant.settings()))] },
+      { title: 'Criar com IA', items: [big('aiplan', 'Planta baixa\nde imagem', () => { ui.assistant.ask('Desenhe uma planta baixa inspirada na imagem anexada, com paredes, portas, janelas, nomes dos cômodos com área e cotas externas.'); ui.assistant.file.click(); }), col(sm('pline', 'Planta por descrição', () => ui.assistant.ask('Desenhe a planta baixa de uma casa térrea com 2 quartos, sala/cozinha integradas, 1 banheiro e área de serviço, cerca de 60 m², com cotas.')), sm('layers', 'Camadas de arquitetura', () => ui.assistant.ask('Crie as camadas padrão de projeto de arquitetura com cores e espessuras adequadas.')), sm('titleblock', 'Organizar desenho', () => ui.assistant.ask('Analise o desenho atual, organize os objetos em camadas adequadas por tipo e me diga o que encontrou.')))] },
+      { title: 'Configurar com IA', items: [col(sm('options', 'Ajustar ambiente', () => ui.assistant.ask('Configure o ambiente para desenho de arquitetura em milímetros: grade 100, snap de objeto nas extremidades/meio/interseção, orto ligado.')), sm('dimlin', 'Escala de cotas', () => ui.assistant.ask('Ajuste o estilo de cota e a altura de texto para impressão na escala 1:50.')), sm('help', 'Como usar', () => ui.assistant.ask('O que você consegue fazer neste programa? Dê exemplos curtos de pedidos.')))] },
     ] },
     { id: 'output', label: 'Saída', panels: [
       { title: 'Plotar', items: [big('plot', 'Plotar', run('PLOT')), big('pagesetup', 'Configurar\npágina', run('PLOT'))] },

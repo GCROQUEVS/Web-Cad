@@ -18,7 +18,7 @@ app.mount();
 Renderer.onImageLoad = () => { app.sceneDocDirty = true; app.redraw(); };
 applyOptions(app, ui);
 if (app.settings.showStart) setTimeout(() => ui.showStart(true), 100);
-try { if (localStorage.getItem('webcad.side') !== '1') document.body.classList.add('noside'); if (localStorage.getItem('webcad.laypal') === '1') ui.layerPalette.show(); } catch { document.body.classList.add('noside'); }
+try { if (localStorage.getItem('webcad.side') !== '1') document.body.classList.add('noside'); if (localStorage.getItem('webcad.laypal') === '1') ui.layerPalette.show(); if (localStorage.getItem('webcad.aipanel') === '1') ui.assistant.show(); } catch { document.body.classList.add('noside'); }
 setTimeout(() => app.resize(), 30);
 app.view = { cx: 100, cy: 70, scale: Math.min(app.W / 240, app.H / 160) };
 app.cOver.style.cursor = 'none';

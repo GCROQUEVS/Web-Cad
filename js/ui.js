@@ -11,6 +11,7 @@ import { VP_SCALES, vsLabel, scaleToVs } from './entities.js';
 import { cloneEnt } from './entities.js';
 import { OSNAP_KINDS } from './app.js';
 import { buildChrome, renderDocTabs, LayerPalette, icon, popupMenu } from './ribbon.js';
+import { Assistant } from './assistant.js';
 import { setFont } from './entities.js';
 import { optionsDialog } from './options.js';
 
@@ -87,6 +88,8 @@ export class UI {
     this.docs = [{ doc: app.doc, state: null, handle: null }]; this.curDoc = 0; this.startOpen = false;
     buildChrome(this); this.buildCmd(); this.buildProps();
     this.layerPalette = new LayerPalette(this);
+    this.assistant = new Assistant(this);
+    app.register('ASSISTENTE', () => { this.assistant.toggle(); }, ['IA', 'AI', 'ASSISTANT', 'CHAT'], 'Assistente de IA (desenha e configura por conversa)'); app.commands.ASSISTENTE.noTx = true; app.commands.ASSISTENTE.noRepeat = true;
     this.buildStart(); renderDocTabs(this); this.refreshLayoutTabs();
     app.onSpace = () => { this.refreshLayoutTabs(); this.showLayoutTab(app.space !== 'MODEL'); this.refreshStatus(); this.layerPalette.render(); this.refreshProps(); this.updateTitle(); };
     app.onMsg = (t, c) => this.addHist(t, c);

@@ -46,6 +46,18 @@ Interface no estilo dos programas CAD de mesa (tema escuro):
 - **Carimbo ABNT** (`CARIMBO`): margens de 25 mm à esquerda e 7 ou 10 mm nas demais, e carimbo de 175 mm (NBR 10068) com campos editáveis
 - Layouts e viewports são lidos e gravados no DXF (abrem no AutoCAD), e os layouts de arquivos DWG/DXF são importados
 
+## Assistente de IA
+
+Aba **Assistente IA** na faixa de opções (ou comando `IA`). Abre um painel de conversa onde você pede, por exemplo:
+- "Desenhe a planta baixa de uma casa de 2 quartos com cotas" ou anexe uma imagem (croqui, foto de planta) e peça uma planta inspirada nela;
+- "Crie as camadas de arquitetura", "mude o fundo para branco e ligue o orto", "mova tudo da camada 0 para PAREDES".
+
+O assistente usa ferramentas do próprio programa (ler o desenho, desenhar paredes/portas/janelas/textos/cotas/hachuras, editar, configurar camadas e opções, executar comandos). Cada ação pode ser desfeita com Ctrl+Z.
+
+Dois modos:
+- **Claude nativo**: quando a página é aberta dentro do claude.ai, usa a conta Claude de quem está vendo, sem chave.
+- **API Anthropic**: no site próprio, informe uma chave da API (console.anthropic.com) em *Configurar IA*. A chave fica só no navegador (localStorage) e é enviada apenas para api.anthropic.com; o uso é cobrado na sua conta da API.
+
 ## Recursos
 - **Desenho:** LINE, PLINE (com arcos e largura), CIRCLE (centro/raio, diâmetro, 2P, 3P, TTR), ARC (3P, início-centro-fim, início-fim-raio, centro-início-fim), RECTANG, POLYGON, ELLIPSE (inclusive arco elíptico), SPLINE, POINT (com estilo de ponto), XLINE, RAY, DONUT, REVCLOUD, WIPEOUT, TEXT, MTEXT, HATCH (14 padrões + sólido, contorno por ponto interno com ilhas), GRADIENT, BOUNDARY, TABLE (aceita colar do Excel)
 - **Modificação:** MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, TRIM/EXTEND, FILLET, CHAMFER, ARRAY (retangular, polar e em caminho), EXPLODE, JOIN, BREAK, BREAKATPOINT, STRETCH, LENGTHEN, ALIGN, MATCHPROP, PEDIT, DIVIDE, MEASURE, DRAWORDER, ERASE
