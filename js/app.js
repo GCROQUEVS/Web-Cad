@@ -12,6 +12,22 @@ export class Cancel extends Error { constructor() { super('cancel'); } }
 export const OSNAP_KINDS = { end: 'Extremidade', mid: 'Ponto médio', cen: 'Centro', qua: 'Quadrante', int: 'Interseção', per: 'Perpendicular', tan: 'Tangente', nea: 'Mais próximo', nod: 'Nó', ins: 'Inserção', ext: 'Extensão' };
 const TRK_NAME = 'Rastreamento';
 
+export const DEFAULT_COLORS = {
+  bg: '#1e2329', cursor: 'auto', gridMajor: 'auto', gridMinor: 'auto', axisX: '#c85050', axisY: '#50c850', track: '#38c172', snap: '#ffd400',
+  tipBg: '#1e2228', tipFg: '#e8eef5', tipBorder: '#5b8cff', winFill: '#3c78ff', crossFill: '#3cc85a', hover: '#9fd0ff', selection: '#4da3ff',
+  grip: '#2f7bff', gripHover: '#ff9a3c', gripHot: '#ff3b30', layoutBg: '#55595f', paper: '#ffffff', cmdBg: '#d6dbe2', cmdFg: '#12171d', histFg: '#c9d2dc',
+};
+export const DEFAULT_OPTIONS = () => ({
+  theme: 'dark', tooltips: true, tooltipKeys: true, fileTabs: true, layoutTabs: true, showPrintable: true, paperBg: true, paperShadow: true, pageSetupOnNew: false, createVp: true,
+  splineSegs: 64, fill: true, qtext: false, lockFade: 50, crosshairSize: 100, lwDefault: 25, lwScale: 1,
+  saveFormat: '2000', autosave: true, autosaveMin: 1, recentCount: 12, warnDwg: true,
+  defDevice: 'PDF', defPaper: 'ISO A3', defLandscape: true, defCtb: 'none', pngDpi: 300,
+  blit: true, lodPx: 0.6, showRenderTime: true, showStart: false,
+  rightClick: 'smart', dblclkEdit: true, dblclkVp: true,
+  snapMarker: true, snapTip: true, showAperture: false, markerSize: 6, trackFull: true, trackTip: true, acquire: 'auto', acquireMs: 350, osnapHatch: false,
+  pickfirst: true, pickadd: true, pickdrag: false, pickauto: true, hoverPreview: true, showGrips: true, gripLimit: 300, winAlpha: 0.15,
+  cmdFont: 'Consolas, Menlo, monospace', cmdSize: 13, cmdLines: 3,
+});
 export class App {
   constructor(root) {
     this.root = root;
@@ -27,6 +43,7 @@ export class App {
       gridSpacing: 10, snapSpacing: 10, polarInc: 90, osnaps: new Set(['end', 'mid', 'cen', 'int', 'qua', 'nod', 'ins', 'per', 'ext']),
       bg: '#1e2329', pickbox: 5, aperture: 10, cursorSize: 0, crosshair: true, gripSize: 5,
     };
+    Object.assign(this.settings, DEFAULT_OPTIONS(), { colors: { ...DEFAULT_COLORS } });
     this.pending = null; // prompt ativo
     this.cmdRunning = null;
     this.lastCmd = null;
@@ -195,7 +212,7 @@ export class App {
     if (this.doc.version !== this.lastVersion) { this.lastVersion = this.doc.version; this.dirty.scene = this.dirty.sel = true; this.sceneDocDirty = true; this.onDocChange && this.onDocChange(); }
     if (this.dirty.scene) {
       this.dirty.scene = false;
-      const viewOnly = !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1 && (this.space || 'MODEL') === 'MODEL';
+      const viewOnly = this.settings.blit && !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1 && (this.space || 'MODEL') === 'MODEL';
       this.sceneDocDirty = false;
       if (viewOnly) { this.blitScene(); clearTimeout(this._fullT); this._fullT = setTimeout(() => { this.renderScene(); this.dirty.sel = true; }, 150); }
       else { clearTimeout(this._fullT); this.renderScene(); }
@@ -204,6 +221,7 @@ export class App {
     if (this.dirty.over) { this.dirty.over = false; this.renderOver(); }
   }
   isDark() { if (this.space && this.space !== 'MODEL') return false; const c = this.settings.bg; const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16); return (r * 0.3 + g * 0.59 + b * 0.11) < 128; }
+  dispOpts() { const S = this.settings; return { fill: S.fill, qtext: S.qtext, lockFade: S.lockFade, lwDefault: S.lwDefault, lwScale: S.lwScale }; }
   // durante pan/zoom em desenhos pesados: reaproveita o último quadro transformado
   blitScene() {
     const v0 = this.backView, v1 = this.view, d = this.dpr;
@@ -223,15 +241,16 @@ export class App {
     const t0 = performance.now();
     const L = this.curLayout();
     if (L) {
-      c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.layoutBg || '#55595f'; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
-      renderLayout(c, this.doc, L, this.paperMatrix(), { screen: true, lwt: this.settings.lwt, dpr: this.dpr, lodPx: 0.6 });
+      c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.colors.layoutBg || '#55595f'; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
+      const S = this.settings;
+      renderLayout(c, this.doc, L, this.paperMatrix(), { screen: true, lwt: S.lwt, dpr: this.dpr, lodPx: S.lodPx, showPrintable: S.showPrintable, paperBg: S.paperBg, paperShadow: S.paperShadow, paperColor: S.colors.paper, ...this.dispOpts() });
       this.lastRenderMs = performance.now() - t0; return;
     }
     c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.bg; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
     let n = 0;
     this.eachVp(c, () => {
       if (this.settings.grid) this.drawGrid(c);
-      const r = new Renderer(c, this.doc, { dark: this.isDark(), lwt: this.settings.lwt, dpr: this.dpr, bg: this.settings.bg });
+      const r = new Renderer(c, this.doc, { dark: this.isDark(), lwt: this.settings.lwt, dpr: this.dpr, bg: this.settings.bg, lodPx: this.settings.lodPx, ...this.dispOpts() });
       c.lineCap = 'round'; c.lineJoin = 'round';
       n += renderDoc(r, this.doc, this.devMatrix(), this.viewBB());
     });
@@ -241,7 +260,8 @@ export class App {
     let sp = this.settings.gridSpacing; while (sp * this.view.scale < 8) sp *= 5;
     const bb = this.viewBB(); const d = this.dpr; const V = this.vp;
     c.setTransform(1, 0, 0, 1, 0, 0);
-    const major = this.isDark() ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.12)', minor = this.isDark() ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.05)';
+    const C = this.settings.colors;
+    const major = C.gridMajor !== 'auto' ? C.gridMajor : this.isDark() ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.12)', minor = C.gridMinor !== 'auto' ? C.gridMinor : this.isDark() ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.05)';
     for (const [step, col] of [[sp, minor], [sp * 5, major]]) {
       c.beginPath(); c.strokeStyle = col; c.lineWidth = 1;
       for (let x = Math.ceil(bb.minX / step) * step; x <= bb.maxX; x += step) { const s = this.w2s(P(x, 0)); const X = Math.round(s.x * d) + 0.5; c.moveTo(X, V.y * d); c.lineTo(X, (V.y + V.h) * d); }
@@ -249,14 +269,14 @@ export class App {
       c.stroke();
     }
     // eixos
-    c.beginPath(); c.strokeStyle = 'rgba(200,80,80,0.35)'; const o = this.w2s(P(0, 0)); c.moveTo(V.x * d, o.y * d); c.lineTo((V.x + V.w) * d, o.y * d); c.stroke();
-    c.beginPath(); c.strokeStyle = 'rgba(80,200,80,0.35)'; c.moveTo(o.x * d, V.y * d); c.lineTo(o.x * d, (V.y + V.h) * d); c.stroke();
+    c.beginPath(); c.strokeStyle = C.axisX; c.globalAlpha = 0.45; const o = this.w2s(P(0, 0)); c.moveTo(V.x * d, o.y * d); c.lineTo((V.x + V.w) * d, o.y * d); c.stroke();
+    c.beginPath(); c.strokeStyle = C.axisY; c.moveTo(o.x * d, V.y * d); c.lineTo(o.x * d, (V.y + V.h) * d); c.stroke(); c.globalAlpha = 1;
   }
   renderSel() {
     const c = this.ctxSel; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.cSel.width, this.cSel.height);
     if (!this.sel.size) return;
     this.eachVp(c, () => {
-    const r = new Renderer(c, this.doc, { dark: this.isDark(), dpr: this.dpr, mono: '#4da3ff', forcedWidth: 2 * this.dpr, lodPx: 0 });
+    const r = new Renderer(c, this.doc, { dark: this.isDark(), dpr: this.dpr, mono: this.settings.colors.selection, forcedWidth: 2 * this.dpr, lodPx: 0 });
     c.globalAlpha = 0.9;
     const Tm = this.devMatrix(), vb = this.viewBB();
     c.setLineDash([]);
@@ -266,13 +286,14 @@ export class App {
     r.flush();
     c.globalAlpha = 1;
     // grips
-    if (!this.cmdRunning && this.sel.size <= 300) {
+    if (!this.cmdRunning && this.settings.showGrips && this.sel.size <= this.settings.gripLimit) {
       const gs = this.settings.gripSize * this.dpr;
       for (const e of this.sel) {
         const h = T[e.type]; if (!h || !h.grips) continue;
         for (const g of h.grips(e, this.doc)) {
           const s = this.w2s(g); if (s.x < -10 || s.y < -10 || s.x > this.W + 10 || s.y > this.H + 10) continue;
-          c.fillStyle = '#2f7bff'; c.strokeStyle = '#ffffff'; c.lineWidth = 1;
+          const hg = this.hoverGrip && G.eq(this.hoverGrip, g, 1e-9), hot = this.hotGrip && G.eq(this.hotGrip.p, g, 1e-9);
+          c.fillStyle = hot ? this.settings.colors.gripHot : hg ? this.settings.colors.gripHover : this.settings.colors.grip; c.strokeStyle = '#ffffff'; c.lineWidth = 1;
           c.fillRect(s.x * this.dpr - gs, s.y * this.dpr - gs, gs * 2, gs * 2); c.strokeRect(s.x * this.dpr - gs + 0.5, s.y * this.dpr - gs + 0.5, gs * 2 - 1, gs * 2 - 1);
         }
       }
@@ -292,7 +313,7 @@ export class App {
         r.flush();
       }
       if (this.hover && !this.selWin) {
-        const r = new Renderer(c, this.doc, { dark, dpr: d, mono: dark ? '#9fd0ff' : '#0050c0', forcedWidth: 2.5 * d, lodPx: 0 });
+        const r = new Renderer(c, this.doc, { dark, dpr: d, mono: dark ? this.settings.colors.hover : '#0050c0', forcedWidth: 2.5 * d, lodPx: 0 });
         r.ctx.beginPath(); r.key = null; r.drawEnt(this.hover, this.devMatrix(), null, this.viewBB()); r.flush();
       }
     });
@@ -309,8 +330,9 @@ export class App {
     if (this.selWin) {
       const a = this.w2s(this.selWin.a), b = this.cursorScreen;
       const crossing = b.x < a.x;
-      c.fillStyle = crossing ? 'rgba(60,200,90,0.15)' : 'rgba(60,120,255,0.15)';
-      c.strokeStyle = crossing ? '#5ad07a' : '#5b8cff'; c.lineWidth = d;
+      const wc = crossing ? this.settings.colors.crossFill : this.settings.colors.winFill;
+      c.globalAlpha = this.settings.winAlpha; c.fillStyle = wc; c.fillRect(Math.min(a.x, b.x) * d, Math.min(a.y, b.y) * d, Math.abs(a.x - b.x) * d, Math.abs(a.y - b.y) * d); c.globalAlpha = 1;
+      c.fillStyle = 'transparent'; c.strokeStyle = wc; c.lineWidth = d;
       c.setLineDash(crossing ? [5 * d, 4 * d] : []);
       c.fillRect(Math.min(a.x, b.x) * d, Math.min(a.y, b.y) * d, Math.abs(a.x - b.x) * d, Math.abs(a.y - b.y) * d);
       c.strokeRect(Math.min(a.x, b.x) * d, Math.min(a.y, b.y) * d, Math.abs(a.x - b.x) * d, Math.abs(a.y - b.y) * d);
@@ -326,29 +348,31 @@ export class App {
     // rastreamento polar / de snap / extensão
     if (this.tracks && this.tracks.length) {
       const b = this.w2s(this.cursor);
-      c.strokeStyle = '#38c172'; c.lineWidth = d; c.setLineDash([2 * d, 4 * d]);
+      c.strokeStyle = this.settings.colors.track; c.lineWidth = d; c.setLineDash([2 * d, 4 * d]);
       for (const t of this.tracks) {
         const a = this.w2s(t.from); const v = G.norm(sub(b, a));
-        c.beginPath(); c.moveTo(a.x * d, a.y * d); c.lineTo((b.x + v.x * 4000) * d, (b.y + v.y * 4000) * d); c.stroke();
+        const ext = this.settings.trackFull ? 4000 : 40;
+        c.beginPath(); c.moveTo(a.x * d, a.y * d); c.lineTo((b.x + v.x * ext) * d, (b.y + v.y * ext) * d); c.stroke();
       }
       c.setLineDash([]);
-      if (this.trackLabel && !(this.settings.dyn && this.pending)) this.drawTip(c, b.x + 16, b.y + 34, this.trackLabel);
+      if (this.settings.trackTip && this.trackLabel && !(this.settings.dyn && this.pending)) this.drawTip(c, b.x + 16, b.y + 34, this.trackLabel);
     }
     // pontos adquiridos
-    for (const tp of this.trackPts) { const s = this.w2s(tp.p); c.strokeStyle = '#38c172'; c.lineWidth = 1.5 * d; c.beginPath(); c.moveTo((s.x - 5) * d, s.y * d); c.lineTo((s.x + 5) * d, s.y * d); c.moveTo(s.x * d, (s.y - 5) * d); c.lineTo(s.x * d, (s.y + 5) * d); c.stroke(); }
+    for (const tp of this.trackPts) { const s = this.w2s(tp.p); c.strokeStyle = this.settings.colors.track; c.lineWidth = 1.5 * d; c.beginPath(); c.moveTo((s.x - 5) * d, s.y * d); c.lineTo((s.x + 5) * d, s.y * d); c.moveTo(s.x * d, (s.y - 5) * d); c.lineTo(s.x * d, (s.y + 5) * d); c.stroke(); }
     // marcador de osnap
-    if (this.snap) this.drawSnapMarker(c, this.w2s(this.snap.p), this.snap.k);
+    if (this.snap && this.settings.snapMarker) this.drawSnapMarker(c, this.w2s(this.snap.p), this.snap.k);
     // cursor
     const s = this.cursorScreen;
     if (s.x >= 0 && this.mouseIn) {
       const pick = this.settings.pickbox;
-      c.strokeStyle = fg; c.lineWidth = d; c.beginPath();
+      const cc = this.settings.colors.cursor; c.strokeStyle = cc && cc !== 'auto' ? cc : fg; c.lineWidth = d; c.beginPath();
       const showCross = this.pending ? this.pending.kind !== 'select' && this.pending.kind !== 'entity' : true;
-      const L = this.settings.crosshair ? 99999 : 20;
+      const L = this.settings.crosshairSize >= 100 ? 99999 : Math.max(8, Math.min(this.W, this.H) * this.settings.crosshairSize / 200);
       const sx = Math.round(s.x * d) + 0.5, sy = Math.round(s.y * d) + 0.5;
       if (showCross) { c.moveTo(sx - L * d, sy); c.lineTo(sx - pick * d, sy); c.moveTo(sx + pick * d, sy); c.lineTo(sx + L * d, sy); c.moveTo(sx, sy - L * d); c.lineTo(sx, sy - pick * d); c.moveTo(sx, sy + pick * d); c.lineTo(sx, sy + L * d); }
       if (!this.pending || this.pending.kind === 'select' || this.pending.kind === 'entity') c.rect(sx - pick * d, sy - pick * d, pick * 2 * d, pick * 2 * d);
       c.stroke();
+      if (this.settings.showAperture && this.pending && showCross && (this.settings.osnap || this.oneShot)) { const ap_ = this.settings.aperture; c.beginPath(); c.strokeStyle = this.settings.colors.snap; c.globalAlpha = 0.7; c.rect(sx - ap_ * d, sy - ap_ * d, 2 * ap_ * d, 2 * ap_ * d); c.stroke(); c.globalAlpha = 1; }
       // tooltip dinâmico
       if (this.settings.dyn && this.pending && this.pending.kind !== 'select' && this.pending.kind !== 'entity') {
         let txt = this.pending.prompt.replace(/\s*\[.*\]/, '').replace(/<[^>]*>/g, '');
@@ -369,13 +393,14 @@ export class App {
     const w = Math.max(...lines.map((l) => c.measureText(l).width)) + 12 * d;
     const h = lines.length * 18 * d + 4 * d;
     let X = x * d, Y = y * d; if (X + w > this.W * d) X -= w + 40 * d; if (Y + h > this.H * d) Y -= h + 40 * d;
-    c.fillStyle = 'rgba(30,34,40,0.92)'; c.strokeStyle = '#5b8cff'; c.lineWidth = d;
+    const C = this.settings.colors; c.globalAlpha = 0.94; c.fillStyle = C.tipBg; c.strokeStyle = C.tipBorder; c.lineWidth = d;
     c.fillRect(X, Y, w, h); c.strokeRect(X + 0.5, Y + 0.5, w, h);
-    c.fillStyle = '#e8eef5'; lines.forEach((l, i) => c.fillText(l, X + 6 * d, Y + 11 * d + i * 18 * d));
+    c.globalAlpha = 1; c.fillStyle = C.tipFg; lines.forEach((l, i) => c.fillText(l, X + 6 * d, Y + 11 * d + i * 18 * d));
   }
   drawSnapMarker(c, s, k) {
-    const d = this.dpr, r = 6 * d, x = s.x * d, y = s.y * d;
-    c.strokeStyle = '#ffd400'; c.lineWidth = 2 * d; c.beginPath();
+    const d = this.dpr, r = (this.settings.markerSize || 6) * d, x = s.x * d, y = s.y * d;
+    const sc = this.settings.colors.snap; const r0 = this.settings.markerSize || 6;
+    c.strokeStyle = sc; c.lineWidth = 2 * d; c.beginPath();
     switch (k) {
       case 'end': c.rect(x - r, y - r, 2 * r, 2 * r); break;
       case 'mid': c.moveTo(x, y - r); c.lineTo(x + r, y + r * 0.8); c.lineTo(x - r, y + r * 0.8); c.closePath(); break;
@@ -388,11 +413,11 @@ export class App {
       case 'nod': c.arc(x, y, r, 0, G.TAU); c.moveTo(x - r * 0.7, y - r * 0.7); c.lineTo(x + r * 0.7, y + r * 0.7); c.moveTo(x + r * 0.7, y - r * 0.7); c.lineTo(x - r * 0.7, y + r * 0.7); break;
       case 'ins': c.rect(x - r, y - r, r, r); c.rect(x, y, r, r); break;
       case 'ext': c.moveTo(x - r, y); c.lineTo(x + r, y); break;
-      case 'trk': c.strokeStyle = '#38c172'; c.moveTo(x - r, y - r); c.lineTo(x + r, y + r); c.moveTo(x + r, y - r); c.lineTo(x - r, y + r); break;
+      case 'trk': c.strokeStyle = this.settings.colors.track; c.moveTo(x - r, y - r); c.lineTo(x + r, y + r); c.moveTo(x + r, y - r); c.lineTo(x - r, y + r); break;
       case 'grid': c.moveTo(x - r, y); c.lineTo(x + r, y); c.moveTo(x, y - r); c.lineTo(x, y + r); break;
     }
     c.stroke();
-    if (this.settings.dyn) { c.font = `${11 * d}px Segoe UI, Arial`; c.fillStyle = '#ffd400'; c.fillText(OSNAP_KINDS[k] || (k === 'trk' ? TRK_NAME : ''), x + 10 * d, y + 18 * d); }
+    void r0; if (this.settings.dyn && this.settings.snapTip) { c.font = `${11 * d}px Segoe UI, Arial`; c.fillStyle = sc; c.fillText(OSNAP_KINDS[k] || (k === 'trk' ? TRK_NAME : ''), x + 10 * d, y + 18 * d); }
   }
   // ---------------- osnap ----------------
   computeSnap(raw) {
@@ -406,7 +431,7 @@ export class App {
     if (kinds.size) {
       const ap_ = this.pxw(st.aperture);
       const bb = { minX: raw.x - ap_, minY: raw.y - ap_, maxX: raw.x + ap_, maxY: raw.y + ap_ };
-      let cands = this.doc.query(bb).filter((e) => this.doc.visible(e));
+      let cands = this.doc.query(bb).filter((e) => this.doc.visible(e) && (st.osnapHatch || e.type !== 'HATCH'));
       if (this.hotGrip) cands = cands.filter((e) => !this.hotGrip.ents.includes(e));
       if (cands.length > 60) cands = cands.slice(-60);
       const consider = (p, k, pri = 0) => { const dd = dist(p, raw); if (dd <= ap_ && (!best || dd + pri * ap_ < best.d)) best = { p, k, d: dd + pri * ap_ }; };
@@ -585,13 +610,14 @@ export class App {
     el.addEventListener('dblclick', (ev) => {
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
       if (this.pending || this.cmdRunning) return;
-      if (this.curLayout()) {
+      if (this.curLayout() && this.settings.dblclkVp !== false) {
         // clique duplo dentro de uma viewport entra no modelo; fora dela volta ao papel
         const pp = this.paperPt(sp); const vp = this.vpAtPaper(pp);
         if (this.msvp && !vp) { this.pspace(); return; }
         if (!this.msvp && vp && !this.pick(sp, (x) => x.type !== 'VIEWPORT')) { this.mspace(vp); return; }
       }
       const e = this.pick(sp);
+      if (!this.settings.dblclkEdit) return;
       if (e && (e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'DIMENSION' || e.type === 'ATTRIB')) this.onEditText && this.onEditText(e);
       else if (e) { this.setSel([e]); this.onShowProps && this.onShowProps(); }
     });
@@ -607,17 +633,19 @@ export class App {
         this._acqP = r.snap.p; clearTimeout(this._acq);
         this._acq = setTimeout(() => {
           if (!this.snap || !G.eq(this.snap.p, r.snap.p) || !this.settings.otrack) return;
+          if (this.settings.acquire === 'shift' && !this._shiftHeld) return;
           const i = this.trackPts.findIndex((t) => G.eq(t.p, r.snap.p));
           if (i >= 0) this.trackPts.splice(i, 1); else { this.trackPts.push({ p: r.snap.p }); if (this.trackPts.length > 7) this.trackPts.shift(); }
           this.dirty.over = true; this.updateCursor(this.cursorScreen);
-        }, 350);
+        }, this.settings.acquireMs || 350);
       }
     } else { this._acqP = null; clearTimeout(this._acq);
     }
     // hover
     if (!this.pending && !this.selWin && !this.hotGrip && this.doc.ents.size < 2000000) {
       const g = this.gripAt(sp);
-      const h = g ? null : this.pick(sp);
+      const hgp = g ? g.p : null; if ((hgp && !this.hoverGrip) || (!hgp && this.hoverGrip) || (hgp && this.hoverGrip && !G.eq(hgp, this.hoverGrip))) { this.hoverGrip = hgp; this.dirty.sel = true; }
+      const h = g || !this.settings.hoverPreview ? null : this.pick(sp);
       if (h !== this.hover) { this.hover = h; }
     } else if (this.pending && (this.pending.kind === 'select' || this.pending.kind === 'entity') && !this.selWin) {
       this.hover = this.pick(sp, this.pending.opts && this.pending.opts.filter);
@@ -630,7 +658,7 @@ export class App {
     this.dirty.over = true;
   }
   gripAt(sp) {
-    if (this.cmdRunning || !this.sel.size || this.sel.size > 300) return null;
+    if (this.cmdRunning || !this.sel.size || !this.settings.showGrips || this.sel.size > this.settings.gripLimit) return null;
     const tol = this.settings.gripSize + 2;
     for (const e of this.sel) {
       const h = T[e.type]; if (!h || !h.grips) continue;
@@ -652,31 +680,36 @@ export class App {
     const e = this.pick(sp);
     if (e) {
       if (!this.selectable(e)) { this.msg('Objeto em camada bloqueada.'); return; }
-      if (ev.shiftKey) this.addSel([e], this.sel.has(e)); else this.addSel([e]);
+      if (ev.shiftKey) { if (this.settings.pickadd) this.addSel([e], this.sel.has(e)); else this.addSel([e], this.sel.has(e)); }
+      else if (!this.settings.pickadd && !pd) this.setSel([e]); else this.addSel([e]);
       this.lastPickWin = null;
       if (pd && pd.kind === 'select' && pd.opts.single) this.resolvePending([...this.sel]);
       this.updateSelPrompt();
       return;
     }
+    if (!this.settings.pickauto && !pd) { if (!ev.shiftKey && !this.settings.pickadd) this.clearSel(); return; }
     this.selWin = { a: this.s2w(sp), sa: sp, shift: ev.shiftKey, drag: false };
   }
   onLeftUp(sp, ev) {
     if (this.selWin && this.downAt && dist(sp, this.selWin.sa) > 6) this.finishWindow(sp, ev);
+    else if (this.selWin && this.settings.pickdrag) { this.selWin = null; if (!ev.shiftKey && !this.settings.pickadd && !this.pending) this.clearSel(); this.dirty.over = true; }
   }
   finishWindow(sp, ev) {
     const w = this.selWin; this.selWin = null;
     const b = this.s2w(sp); const crossing = sp.x < w.sa.x;
     const list = this.windowSelect(w.a, b, crossing).filter((e) => this.selectable(e));
     this.lastWindow = { a: w.a, b, crossing };
-    this.addSel(list, ev.shiftKey || w.shift);
+    if (!this.settings.pickadd && !this.pending && !(ev.shiftKey || w.shift)) this.setSel(list); else this.addSel(list, ev.shiftKey || w.shift);
     this.updateSelPrompt();
     this.dirty.over = true;
   }
   updateSelPrompt() { if (this.pending && this.pending.kind === 'select') this.msg(`${this.sel.size} objeto(s) selecionado(s).`, 'dim'); }
   onRightClick(sp) {
     if (this.hotGrip) { this.cancelGrip(); return; }
-    if (this.pending) { this.submit(''); return; }
-    if (!this.cmdRunning && this.lastCmd && !this.sel.size) { this.run(this.lastCmd); return; }
+    const mode = this.settings.rightClick;
+    if (mode === 'enter') { if (this.pending) this.submit(''); else if (!this.cmdRunning && this.lastCmd) this.run(this.lastCmd); return; }
+    if (this.pending) { if (mode === 'menu' && this.pending.opts && this.pending.opts.keywords && this.pending.opts.keywords.length) { this.onPromptMenu && this.onPromptMenu(sp, this.pending.opts.keywords); return; } this.submit(''); return; }
+    if (mode === 'smart' && !this.cmdRunning && this.lastCmd && !this.sel.size) { this.run(this.lastCmd); return; }
     this.onContextMenu && this.onContextMenu(sp);
   }
   // ---------------- grips ----------------
@@ -719,7 +752,9 @@ export class App {
   cancelGrip() { this.hotGrip = null; this.preview = []; this.dirty.sel = this.dirty.over = true; this.msg('*Cancelado*'); }
   // ---------------- teclado ----------------
   bindKeys() {
+    window.addEventListener('keyup', (ev) => { if (ev.key === 'Shift') this._shiftHeld = false; });
     window.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Shift') this._shiftHeld = true;
       const tgt = ev.target;
       const inField = tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT') && tgt !== this.cmdInput;
       if (document.querySelector('.modal.open') && ev.key !== 'Escape') return;
@@ -916,7 +951,7 @@ export class App {
   getKeyword(prompt, keywords, def) { return this.ask('keyword', prompt, { keywords, default: def }); }
   getEntity(prompt, opts = {}) { return this.ask('entity', prompt, opts); }
   async getSelection(prompt = 'Selecione objetos:', opts = {}) {
-    if (this.sel.size && !opts.fresh) { const s = [...this.sel].filter((e) => this.selectable(e)); this.prevSel = s; this.clearSel(); return s; }
+    if (this.sel.size && !opts.fresh && this.settings.pickfirst) { const s = [...this.sel].filter((e) => this.selectable(e)); this.prevSel = s; this.clearSel(); return s; }
     const r = await this.ask('select', prompt, opts);
     const list = r.filter((e) => this.doc.ents.has(e.id));
     this.clearSel();

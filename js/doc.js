@@ -205,8 +205,9 @@ export const PAPER_SIZES = {
   'ISO A4': [297, 210], 'ISO A3': [420, 297], 'ISO A2': [594, 420], 'ISO A1': [841, 594], 'ISO A0': [1189, 841],
   'ISO A4 estendido': [297 + 0, 210], 'ANSI A (Carta)': [279.4, 215.9], 'Ofício': [355.6, 215.9], 'ANSI B (Tabloide)': [431.8, 279.4], 'ANSI C': [558.8, 431.8], 'ANSI D': [863.6, 558.8], 'ARCH D': [914.4, 609.6],
 };
-export function defaultPage(paper = 'ISO A3') {
-  return { paper, custom: null, landscape: true, margin: 5, device: 'PDF', area: 'layout', fit: false, scale: 1, units: 'mm', center: false, offX: 0, offY: 0, ctb: 'none', lwt: true, plotStyles: true, psLast: true, hidePs: false, upside: false, scaleLw: false, name: '' };
+export const PAGE_DEFAULTS = {};
+export function defaultPage(paper) {
+  return { paper: 'ISO A3', custom: null, landscape: true, margin: 5, device: 'PDF', area: 'layout', fit: false, scale: 1, units: 'mm', center: false, offX: 0, offY: 0, ctb: 'none', lwt: true, plotStyles: true, psLast: true, hidePs: false, upside: false, scaleLw: false, name: '', ...PAGE_DEFAULTS, ...(paper ? { paper } : {}) };
 }
 export function pageSize(p) {
   let [w, h] = p.custom || PAPER_SIZES[p.paper] || PAPER_SIZES['ISO A3'];

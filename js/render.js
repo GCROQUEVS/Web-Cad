@@ -29,6 +29,7 @@ export class Renderer {
     this.vpFrozen = opts.vpFrozen || null; // camadas congeladas na viewport
     this.plotting = !!opts.plotting; // na plotagem, camadas "não plotar" ficam de fora
     this.gray = !!opts.gray;
+    this.fill = opts.fill ?? true; this.qtext = !!opts.qtext; this.lockFade = opts.lockFade || 0; this.lwDefault = opts.lwDefault ?? 25; this.lwScale = opts.lwScale ?? 1;
   }
   flush() {
     if (this.pending) { const c = this.ctx; c.setTransform(1, 0, 0, 1, 0, 0); c.stroke(); this.pending = false; }
@@ -54,7 +55,8 @@ export class Renderer {
     if (lw === -1) lw = L.lw; else if (lw === -2) lw = par ? par.lw : -3;
     let css = this.mono || (tc != null ? trueCss(tc) : aciCss(color, this.dark));
     if (this.gray && !this.mono) css = toGray(css);
-    return { color, tc, ltype: lt, lw, css, layer: L.name, lts: (e.ltscale || 1) * (par ? par.lts : 1) };
+    const alpha = par ? par.alpha : (L.locked && this.lockFade ? Math.max(0.1, 1 - this.lockFade / 100) : 1);
+    return { color, tc, ltype: lt, lw, css, layer: L.name, lts: (e.ltscale || 1) * (par ? par.lts : 1), alpha };
   }
   applyStroke(st, Tm) {
     if (st === this.lastSt && Tm === this.lastTm && this.key) return;
@@ -68,11 +70,11 @@ export class Renderer {
       if (tot > 3 * this.dpr && tot < 1e5) dash = ltd.pat.map((v) => Math.max(v === 0 ? 0.5 * this.dpr : Math.abs(v) * k, 0.5));
     }
     let lw = this.forcedWidth || this.minLw;
-    if (this.lwt && !this.forcedWidth) { const w = st.lw < 0 ? 25 : st.lw; lw = Math.max(this.minLw, w / 100 * this.pxPerMm); }
-    const key = st.css + '|' + (dash ? dash.map((v) => v.toFixed(1)).join(',') : '') + '|' + lw.toFixed(2);
+    if (this.lwt && !this.forcedWidth) { const w = st.lw < 0 ? this.lwDefault : st.lw; lw = Math.max(this.minLw, w / 100 * this.pxPerMm * this.lwScale); }
+    const key = (st.alpha ?? 1) + '|' + st.css + '|' + (dash ? dash.map((v) => v.toFixed(1)).join(',') : '') + '|' + lw.toFixed(2);
     if (key !== this.key) {
       this.flush(); const c = this.ctx;
-      c.strokeStyle = st.css; c.fillStyle = st.css; c.lineWidth = lw; c.setLineDash(dash || []); this.key = key;
+      c.strokeStyle = st.css; c.fillStyle = st.css; c.lineWidth = lw; c.setLineDash(dash || []); c.globalAlpha = st.alpha ?? 1; this.key = key;
     }
   }
   // desenha uma lista de entidades
@@ -103,7 +105,7 @@ export class Renderer {
     this.applyStroke(st, Tm);
     const c = this.ctx;
     if (h.fill) { this.flush(); this.fillEnt(e, Tm, st); this.curT = null; return; }
-    if (e.type === 'LWPOLYLINE' && e.width > 0) {
+    if (e.type === 'LWPOLYLINE' && e.width > 0 && this.fill) {
       this.flush(); c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]);
       h.path(c, e, 1 / G.mScale(Tm)); c.setTransform(1, 0, 0, 1, 0, 0);
       const lw = c.lineWidth; c.lineWidth = Math.max(lw, e.width * G.mScale(Tm)); c.lineJoin = 'round'; c.stroke(); c.lineWidth = lw; c.beginPath(); return;
@@ -138,7 +140,7 @@ export class Renderer {
         const p = solidOrder(e.pts);
         c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]); c.beginPath();
         c.moveTo(p[0].x, p[0].y); for (let i = 1; i < p.length; i++) c.lineTo(p[i].x, p[i].y); c.closePath();
-        c.setTransform(1, 0, 0, 1, 0, 0); c.fill(); c.stroke(); c.beginPath(); break;
+        c.setTransform(1, 0, 0, 1, 0, 0); if (this.fill) c.fill(); c.stroke(); c.beginPath(); break;
       }
       case 'WIPEOUT': {
         c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]); c.beginPath(); loopPath(c, e.pts, true);
@@ -206,7 +208,7 @@ export class Renderer {
         const gr = c.createLinearGradient(p1.x, p1.y, p2.x, p2.y); gr.addColorStop(0, e.gradient.c1); gr.addColorStop(1, e.gradient.c2);
         c.fillStyle = gr;
       }
-      c.fill('evenodd'); c.restore(); c.beginPath(); return;
+      if (this.fill) c.fill('evenodd'); else c.stroke(); c.restore(); c.beginPath(); return;
     }
     c.clip('evenodd');
     c.beginPath();
@@ -252,6 +254,7 @@ export class Renderer {
     const corners = textCorners(e);
     const s = G.mScale(Tm), hs = e.h * s;
     if (hs < 0.8 * this.dpr) return;
+    if (this.qtext) { c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]); c.beginPath(); c.moveTo(corners[0].x, corners[0].y); for (let i = 1; i < 4; i++) c.lineTo(corners[i].x, corners[i].y); c.closePath(); c.setTransform(1, 0, 0, 1, 0, 0); c.stroke(); c.beginPath(); return; }
     const rot = isM || !(e.ha === 3 || e.ha === 5) ? (e.rot || 0) : G.angle(e.p, e.p2);
     const dv = apv(Tm, P(Math.cos(rot), Math.sin(rot))); const sr = Math.atan2(dv.y, dv.x);
     const flip = M.det(Tm) > 0;
@@ -303,11 +306,15 @@ export function renderLayout(c, doc, layout, Tp, o = {}) {
   if (o.screen) {
     const x = Math.min(P0.x, P1.x), y = Math.min(P0.y, P1.y), w = Math.abs(P1.x - P0.x), h = Math.abs(P1.y - P0.y);
     c.setTransform(1, 0, 0, 1, 0, 0);
-    c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(x + 4 * (o.dpr || 1), y + 4 * (o.dpr || 1), w, h);
-    c.fillStyle = '#ffffff'; c.fillRect(x, y, w, h);
-    const m = layout.page.margin ?? 5; const a = G.ap(Tp, P(m, m)), b = G.ap(Tp, P(pw - m, ph - m));
+    if (o.paperBg !== false) {
+      if (o.paperShadow !== false) { c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(x + 4 * (o.dpr || 1), y + 4 * (o.dpr || 1), w, h); }
+      c.fillStyle = o.paperColor || '#ffffff'; c.fillRect(x, y, w, h);
+    }
+    const m = layout.page.margin ?? 5;
+    if (o.showPrintable !== false) { const a = G.ap(Tp, P(m, m)), b = G.ap(Tp, P(pw - m, ph - m));
     c.strokeStyle = 'rgba(80,80,80,0.6)'; c.lineWidth = 1; c.setLineDash([4 * (o.dpr || 1), 3 * (o.dpr || 1)]);
     c.strokeRect(Math.min(a.x, b.x) + 0.5, Math.min(a.y, b.y) + 0.5, Math.abs(b.x - a.x), Math.abs(b.y - a.y)); c.setLineDash([]);
+    }
   }
   const ents = doc.spaceEnts(layout.name);
   const vps = ents.filter((e) => e.type === 'VIEWPORT');

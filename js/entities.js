@@ -4,7 +4,9 @@ const { P, add, sub, mul, dist, angle, polar, mid, M, ap, apv, bbEmpty, bbAdd, b
 
 let measureCtx = null;
 export let FONT = 'Arial, Helvetica, sans-serif';
-export const CAP = 0.716; // altura de maiúscula / tamanho da fonte
+export const CAP = 0.716;
+export let SPLINE_SEGS = 64;
+export function setSplineSegs(n) { SPLINE_SEGS = Math.max(8, Math.min(1024, n | 0)); } // altura de maiúscula / tamanho da fonte
 const wcache = new Map();
 export function setFont(name) {
   const fam = { Arial: 'Arial, Helvetica, sans-serif', 'Arial Narrow': '"Arial Narrow", "Roboto Condensed", Arial, sans-serif', 'Times New Roman': '"Times New Roman", Times, serif', 'Courier New': '"Courier New", Courier, monospace', Verdana: 'Verdana, Geneva, sans-serif', 'Segoe UI': '"Segoe UI", Roboto, sans-serif', ISOCP: '"Osifont", "Arial Narrow", Arial, sans-serif' }[name] || 'Arial, Helvetica, sans-serif';
@@ -347,8 +349,8 @@ T.ELLIPSE = {
 T.SPLINE = {
   pts: (e) => {
     if (e._pts) return e._pts;
-    if (e.ctrl && e.ctrl.length >= 2) e._pts = G.nurbsPts(e.deg || 3, e.ctrl, e.knots, e.weights, 64);
-    else if (e.fit && e.fit.length >= 2) { const n = G.fitToNurbs(e.fit, e.closed); e._pts = G.nurbsPts(n.deg, n.ctrl, n.knots, null, 64); }
+    if (e.ctrl && e.ctrl.length >= 2) e._pts = G.nurbsPts(e.deg || 3, e.ctrl, e.knots, e.weights, SPLINE_SEGS);
+    else if (e.fit && e.fit.length >= 2) { const n = G.fitToNurbs(e.fit, e.closed); e._pts = G.nurbsPts(n.deg, n.ctrl, n.knots, null, SPLINE_SEGS); }
     else e._pts = [];
     return e._pts;
   },

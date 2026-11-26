@@ -12,6 +12,7 @@ import { cloneEnt } from './entities.js';
 import { OSNAP_KINDS } from './app.js';
 import { buildChrome, renderDocTabs, LayerPalette, icon, popupMenu } from './ribbon.js';
 import { setFont } from './entities.js';
+import { optionsDialog } from './options.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const h = (tag, attrs = {}, ...kids) => {
@@ -62,7 +63,7 @@ export class UI {
     this.startOpen = on; this.startEl.hidden = !on; this._tabsKey = null; this.updateTitle();
     if (!on) return;
     const el = this.startEl; el.innerHTML = '';
-    const recent = (await store.list().catch(() => [])).filter((x) => x.name !== '__autosave__').sort((a, b) => b.time - a.time).slice(0, 12);
+    const recent = (await store.list().catch(() => [])).filter((x) => x.name !== '__autosave__').sort((a, b) => b.time - a.time).slice(0, this.app.settings.recentCount || 12);
     const card = (ic, label, act) => h('button', { class: 'sp-btn', onclick: act }, h('span', { html: icon(ic, 28) }), h('span', {}, label));
     el.append(h('div', { class: 'sp-inner' },
       h('div', { class: 'sp-col' }, h('div', { class: 'sp-brand' }, h('span', { class: 'app-mark big' }, 'W'), h('span', {}, 'WebCAD 2D')),
@@ -104,11 +105,14 @@ export class UI {
     app.onContextMenu = (sp) => this.contextMenu(sp);
     app.onToggleHist = () => this.toggleHist();
     app.onToggleCmd = () => this.toggleCmdLine();
+    app.onPromptMenu = (sp, kws) => {
+      const r = app.wrap.getBoundingClientRect(); const anchor = h('div', { style: `position:fixed;left:${r.left + sp.x}px;top:${r.top + sp.y}px;width:1px;height:1px` }); document.body.append(anchor);
+      popupMenu(anchor, [{ label: 'Enter', key: '↵', act: () => app.submit('') }, { label: 'Cancelar', key: 'Esc', act: () => app.escape() }, '-', ...kws.map((k) => ({ label: k, act: () => app.submit(k) }))]); anchor.remove();
+    };
     app.onHistKey = (k, ev) => this.histKey(k, ev);
     app.onInputChange = () => this.updateAuto();
     this.bindDrop();
     this.refreshToolbar(); this.refreshStatus(); this.refreshProps(); this.updateTitle();
-    setInterval(() => this.autosave(), 60000);
     window.addEventListener('beforeunload', (ev) => { if (app.doc.dirty) { this.autosave(); ev.preventDefault(); ev.returnValue = ''; } });
     setInterval(() => { this.perfEl.textContent = app.lastRenderMs != null ? `${app.lastRenderMs.toFixed(1)} ms` : ''; }, 500);
   }
@@ -451,16 +455,7 @@ export class UI {
     const ins = h('select', {}, ...[[0, 'Sem unidade'], [1, 'Polegadas'], [2, 'Pés'], [4, 'Milímetros'], [5, 'Centímetros'], [6, 'Metros'], [7, 'Quilômetros']].map(([v, l]) => h('option', { value: v }, l))); ins.value = String(d.header.insunits ?? 4);
     if (await this.modal('Unidades do desenho', h('div', {}, this.field('Precisão linear', prec), this.field('Unidade de inserção', ins)))) { d.begin('units'); d.tablesChanged(); d.header.luprec = +prec.value; d.header.insunits = +ins.value; d.commit(); }
   }
-  async optionsDialog() {
-    const s = this.app.settings;
-    const bg = h('input', { type: 'color', value: s.bg });
-    const cross = h('input', { type: 'checkbox' }); cross.checked = s.crosshair;
-    const presets = h('div', { class: 'mtools' }, ...[['Escuro', '#1e2329'], ['Preto', '#000000'], ['Azul', '#203040'], ['Branco', '#ffffff']].map(([l, c]) => h('button', { class: 'btn', onclick: () => { bg.value = c; } }, l)));
-    if (await this.modal('Opções', h('div', {}, this.field('Cor de fundo da área de desenho', bg), presets, h('label', { class: 'chk' }, cross, ' Cursor em cruz em tela cheia'), this.field('Tamanho dos grips (px)', this.numInput(s.gripSize, (v) => { if (v > 1) s.gripSize = v; }))))) {
-      s.bg = bg.value; s.crosshair = cross.checked; document.body.classList.toggle('lightbg', !this.app.isDark()); this.app.redraw();
-    }
-    try { localStorage.setItem('webcad.opts', JSON.stringify({ bg: s.bg, crosshair: s.crosshair, gripSize: s.gripSize })); } catch { /* */ }
-  }
+  async optionsDialog(tab) { return optionsDialog(this, tab); }
   async dimStyleDialog() {
     const ds = this.app.doc.dimstyle;
     const f = (k, l) => this.field(l, this.numInput(ds[k], (v) => { if (v >= 0) ds[k] = v; }));
@@ -571,7 +566,7 @@ export class UI {
       app.zoomExtents(); doc.version++; this.refreshToolbar();
       const sk = Object.entries(st.skipped).map(([k, v]) => `${k}×${v}`).join(', ');
       this.addHist(`Aberto ${file.name}: ${st.entities} objetos, ${doc.layers.size} camadas, ${st.blocks} blocos em ${((performance.now() - t0) / 1000).toFixed(2)} s.` + (sk ? ` Não suportados (ignorados): ${sk}.` : ''), '');
-      if (isDwgFile) this.addHist('Arquivo DWG importado. Ao salvar, o desenho será gravado como DXF (compatível com AutoCAD e outros programas CAD).', 'dim');
+      if (isDwgFile && app.settings.warnDwg) this.addHist('Arquivo DWG importado. Ao salvar, o desenho será gravado como DXF (compatível com AutoCAD e outros programas CAD).', 'dim');
     } catch (e) {
       console.error(e); this.addHist('Erro ao abrir arquivo: ' + e.message, 'err');
       await this.modal('Erro ao abrir', h('p', {}, e.message), [['OK', true]]);
@@ -581,7 +576,7 @@ export class UI {
     const app = this.app, doc = app.doc;
     let r12 = false, name = doc.name.replace(/\.(dwg|dxf)$/i, '') + '.dxf';
     if (as || !this.fileHandle) {
-      const fmt = h('select', {}, h('option', { value: '2000' }, 'DXF AutoCAD 2000 (recomendado)'), h('option', { value: 'r12' }, 'DXF AutoCAD R12 (máxima compatibilidade)'));
+      const fmt = h('select', {}, h('option', { value: '2000' }, 'DXF AutoCAD 2000 (recomendado)'), h('option', { value: 'r12' }, 'DXF AutoCAD R12 (máxima compatibilidade)')); fmt.value = this.app.settings.saveFormat || '2000';
       const nm = h('input', { type: 'text', value: name });
       const ok = await this.modal('Salvar desenho', h('div', {}, this.field('Nome do arquivo', nm), this.field('Formato', fmt), h('p', { class: 'note' }, (window.claude ? 'Nesta página publicada, o DXF é entregue dentro de um .zip (o visualizador não aceita .dxf direto). ' : '') + 'O formato DWG é proprietário e não pode ser gravado no navegador; o DXF abre normalmente no AutoCAD, BricsCAD, LibreCAD, DraftSight, QCAD etc.'))); if (!ok) return;
       r12 = fmt.value === 'r12'; name = nm.value.trim() || name; if (!/\.dxf$/i.test(name)) name += '.dxf';
@@ -722,6 +717,7 @@ export class UI {
     const doc = this.app.doc; const name = doc.uniqueLayoutName(); const base = this.app.curLayout();
     doc.begin('LAYOUT'); doc.tablesChanged(); const L = { name, page: { ...(base ? base.page : defaultPage()) }, view: null, inited: false }; doc.layouts.push(L); doc.commit();
     this.refreshLayoutTabs(); this.app.setSpace(name);
+    if (this.app.settings.pageSetupOnNew) this.pageSetupManager();
   }
   layoutTabMenu(anchor, name) {
     const app = this.app, doc = app.doc; const L = name ? doc.layout(name) : null; const idx = L ? doc.layouts.indexOf(L) : -1;
@@ -866,7 +862,7 @@ export class UI {
     this.busy('Plotando...'); await new Promise((res) => setTimeout(res, 20));
     try {
       const fmt = r.page.device === 'SVG' ? 'svg' : r.page.device === 'PNG' ? 'png' : 'pdf';
-      const blob = await plotLayout(app.doc, { ...L, page: r.page }, { format: fmt, dpi: 300, windowBB: bb, viewBB: bb });
+      const blob = await plotLayout(app.doc, { ...L, page: r.page }, { format: fmt, dpi: app.settings.pngDpi || 300, windowBB: bb, viewBB: bb });
       const name = app.doc.name.replace(/\.(dxf|dwg)$/i, '') + '-' + L.name.replace(/[^\w\- ]+/g, '_') + '.' + fmt;
       await download(blob, name);
       this.addHist(`Layout "${L.name}" plotado: ${name}`);

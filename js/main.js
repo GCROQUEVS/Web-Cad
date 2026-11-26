@@ -4,18 +4,20 @@ import { registerCommands } from './commands.js';
 import { registerMore } from './commands2.js';
 import { registerLayout } from './commands3.js';
 import { Renderer } from './render.js';
+import { loadOptions, applyOptions } from './options.js';
 
 const app = new App(document.body);
 const ui = new UI(app);
 window.webcad = app; window.webcadUI = ui; // depuração
-try { const o = JSON.parse(localStorage.getItem('webcad.opts') || '{}'); Object.assign(app.settings, o); } catch { /* */ }
+loadOptions(app);
 registerCommands(app, ui);
 registerMore(app, ui);
 registerLayout(app, ui);
 ui.init();
 app.mount();
 Renderer.onImageLoad = () => { app.sceneDocDirty = true; app.redraw(); };
-document.body.classList.toggle('lightbg', !app.isDark());
+applyOptions(app, ui);
+if (app.settings.showStart) setTimeout(() => ui.showStart(true), 100);
 try { if (localStorage.getItem('webcad.side') !== '1') document.body.classList.add('noside'); if (localStorage.getItem('webcad.laypal') === '1') ui.layerPalette.show(); } catch { document.body.classList.add('noside'); }
 setTimeout(() => app.resize(), 30);
 app.view = { cx: 100, cy: 70, scale: Math.min(app.W / 240, app.H / 160) };

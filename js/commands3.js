@@ -34,7 +34,7 @@ export function registerLayout(app, ui) {
   const makeVp = (c, w, h, extra = {}) => { const vp = { type: 'VIEWPORT', layer: vpLayer(), c, w: Math.abs(w), h: Math.abs(h), vc: P(0, 0), vs: 1, on: true, locked: false, frozen: [], ...extra }; fitView(vp); return vp; };
   // cria a viewport inicial quando o layout é aberto pela primeira vez (como LAYOUTCREATEVIEWPORT=1)
   app.onInitLayout = (L) => {
-    if (layoutVps(L).length) return;
+    if (layoutVps(L).length || app.settings.createVp === false) return;
     const [pw, ph] = pageSize(L.page); const m = (L.page.margin ?? 5) + 5;
     const save = doc().curSpace; doc().curSpace = L.name;
     const d = doc(); const wasDirty = d.dirty;
@@ -55,7 +55,7 @@ export function registerLayout(app, ui) {
       let name = (await app.getString(`Nome do novo layout <${def}>:`, { spaces: true })) || def;
       if (d.layout(name)) { msg(`Já existe um layout "${name}".`, 'err'); return; }
       d.tablesChanged(); const base = app.curLayout(); d.layouts.push(newLayout(name, base ? base.page : defaultPage()));
-      ui.refreshLayoutTabs(); app.setSpace(name); msg(`Layout "${name}" criado.`, 'dim'); return;
+      ui.refreshLayoutTabs(); app.setSpace(name); msg(`Layout "${name}" criado.`, 'dim'); if (app.settings.pageSetupOnNew) ui.pageSetupManager(); return;
     }
     const cur = app.curLayout() ? app.curLayout().name : d.layouts[0]?.name;
     if (k === 'Copiar') {
