@@ -2,6 +2,7 @@
 import * as G from './geom.js';
 import { T, mtextLayout, cleanText, isSimilar } from './entities.js';
 import { LINETYPES } from './colors.js';
+import { pageSize, PAPER_SIZES, defaultPage, newLayout } from './doc.js';
 const { P } = G;
 const D2R = Math.PI / 180;
 
@@ -60,7 +61,7 @@ export function parseDxf(text, doc) {
   }
   doc.clear();
   doc.layers.clear();
-  const blocksRaw = []; let objsRaw = [];
+  const blocksRaw = []; let objsRaw = []; const psBlocks = [];
   const entsRaw = [];
   while (i < pairs.length) {
     const p = peek();
@@ -115,17 +116,24 @@ export function parseDxf(text, doc) {
     const list = [];
     while (k < blocksRaw.length && blocksRaw[k].type !== 'ENDBLK') list.push(blocksRaw[k++]);
     k++;
-    const ents = convertList(list, doc, stats, true);
     const up = name.toUpperCase();
     if (up === '*MODEL_SPACE' || up === '$MODEL_SPACE') { /* entidades do model space aparecem em ENTITIES */ continue; }
-    if (up.startsWith('*PAPER_SPACE') || up.startsWith('$PAPER_SPACE')) continue;
+    if (up.startsWith('*PAPER_SPACE') || up.startsWith('$PAPER_SPACE')) { psBlocks.push({ name, br: (ownerOf(o) || '').toUpperCase(), list }); continue; }
+    const ents = convertList(list, doc, stats, true);
     doc.blocks.set(name, { name, base, ents, flags });
     stats.blocks++;
   }
-  // entidades
-  const ents = convertList(entsRaw, doc, stats, false);
+  // entidades: separa espaço modelo e espaço papel (67=1), mantendo sequências POLYLINE/INSERT
+  const msRaw = [], psRaw = []; let route = msRaw;
+  for (const o of entsRaw) {
+    if (o.type === 'VERTEX' || o.type === 'ATTRIB' || o.type === 'SEQEND') { route.push(o); continue; }
+    route = gi(o, 67) === 1 ? psRaw : msRaw; route.push(o);
+  }
+  const ents = convertList(msRaw, doc, stats, false);
   for (const e of ents) { doc.defaults(e); doc._insert(e); }
   stats.entities = ents.length;
+  // layouts (pranchas)
+  try { readLayouts(doc, objsRaw, psRaw, psBlocks, stats); } catch (err) { console.warn('layouts', err); }
   // grupos (GROUP no OBJECTS, nomes no dicionário ACAD_GROUP)
   try {
     const byHandle = new Map(); for (const e of doc.ents.values()) if (e.handle) byHandle.set(e.handle.toUpperCase(), e);
@@ -148,8 +156,12 @@ const gf = (o, c, d = 0) => { const f = o.g.find((x) => x[0] === c); return f ? 
 const gi = (o, c, d = 0) => { const f = o.g.find((x) => x[0] === c); return f ? parseInt(f[1], 10) : d; };
 const gall = (o, c) => o.g.filter((x) => x[0] === c).map((x) => x[1]);
 
+function ownerOf(o) { let inR = false; for (const [c, v] of o.g) { if (c === 102) { inR = v.trim().startsWith('{'); continue; } if (c === 330 && !inR) return v.trim(); } return null; }
 function readTables(objs, doc) {
+  doc._brNames = new Map(); doc._layerH = new Map();
   for (const o of objs) {
+    if (o.type === 'BLOCK_RECORD') { const hh = (gv(o, 5) || '').trim().toUpperCase(); if (hh) doc._brNames.set(hh, gv(o, 2) || ''); }
+    if (o.type === 'LAYER' && gv(o, 5)) doc._layerH.set(gv(o, 5).trim().toUpperCase(), gv(o, 2));
     if (o.type === 'LAYER') {
       const name = gv(o, 2); if (!name) continue;
       const col = gi(o, 62, 7), flags = gi(o, 70);
@@ -174,6 +186,58 @@ function readTables(objs, doc) {
   }
 }
 
+// ---- layouts: objetos LAYOUT + entidades do papel (ENTITIES com 67=1 e blocos *Paper_SpaceN)
+function readLayouts(doc, objsRaw, psRaw, psBlocks, stats) {
+  const lays = [];
+  for (const o of objsRaw) {
+    if (o.type !== 'LAYOUT') continue;
+    let name = null, tab = 0, br = null, inLayout = false, limmin = P(0, 0);
+    for (const [c, v] of o.g) { if (c === 100 && v.trim() === 'AcDbLayout') inLayout = true; if (!inLayout) continue; if (c === 1) name = v.trim(); else if (c === 71) tab = parseInt(v); else if (c === 330) br = v.trim().toUpperCase(); else if (c === 10) limmin.x = parseFloat(v); else if (c === 20) limmin.y = parseFloat(v); }
+    if (!name || /^model$/i.test(name)) continue;
+    let pw = gf(o, 44), ph = gf(o, 45); const rot = gi(o, 73);
+    if (rot === 1 || rot === 3) [pw, ph] = [ph, pw];
+    const page = defaultPage();
+    if (pw > 1 && ph > 1) {
+      const hit = Object.entries(PAPER_SIZES).find(([, s2]) => (Math.abs(s2[0] - pw) < 1 && Math.abs(s2[1] - ph) < 1) || (Math.abs(s2[1] - pw) < 1 && Math.abs(s2[0] - ph) < 1));
+      if (hit) page.paper = hit[0]; else page.custom = [Math.max(pw, ph), Math.min(pw, ph)];
+      page.landscape = pw >= ph;
+    }
+    const num = gf(o, 142, 1), den = gf(o, 143, 1); if (num > 0 && den > 0) page.scale = num / den;
+    const pt = gi(o, 74, 5); page.area = { 5: 'layout', 1: 'extents', 0: 'display', 4: 'window' }[pt] || 'layout';
+    const ctb = (gv(o, 7) || '').toLowerCase(); page.ctb = ctb.includes('mono') ? 'mono' : ctb.includes('gray') || ctb.includes('grey') ? 'gray' : 'none';
+    if (gi(o, 75) === 0 && pt !== 5) page.fit = true;
+    lays.push({ name, tab, br, shift: P(-limmin.x, -limmin.y), page });
+  }
+  if (!lays.length) return;
+  lays.sort((a, b) => a.tab - b.tab);
+  const byBr = new Map(lays.map((l) => [l.br, l]));
+  const active = lays.find((l) => (doc._brNames.get(l.br) || '').toUpperCase() === '*PAPER_SPACE') || lays[0];
+  const groupsRaw = new Map(lays.map((l) => [l.name, []]));
+  for (const o of psRaw) { const L = byBr.get((ownerOf(o) || '').toUpperCase()) || active; if (o.type === 'VERTEX' || o.type === 'ATTRIB' || o.type === 'SEQEND') { groupsRaw.get(L.name).push(o); continue; } groupsRaw.get(L.name).push(o); }
+  for (const b of psBlocks) { const L = byBr.get(b.br) || lays.find((l) => (doc._brNames.get(l.br) || '') === b.name); if (L) for (const o of b.list) groupsRaw.get(L.name).push(o); }
+  doc.layouts = [];
+  let total = 0;
+  for (const L of lays) {
+    const list = convertList(groupsRaw.get(L.name), doc, stats, true);
+    const clipHandles = new Set(list.filter((e) => e.type === 'VIEWPORT' && e._clipH).map((e) => e._clipH));
+    const byH = new Map(list.filter((e) => e.handle).map((e) => [e.handle.toUpperCase(), e]));
+    for (const e of list) if (e.type === 'VIEWPORT' && e._clipH) {
+      const ce = byH.get(e._clipH);
+      if (ce) { e.clip = ce.type === 'CIRCLE' ? G.arcPts(ce.c, ce.r, 0, G.TAU - 1e-9).slice(0, -1) : ce.type === 'LWPOLYLINE' ? ce.pts.map((q) => P(q.x, q.y)) : null; }
+      delete e._clipH;
+    }
+    const m = [1, 0, 0, 1, L.shift.x, L.shift.y];
+    const hasShift = Math.abs(L.shift.x) > 1e-9 || Math.abs(L.shift.y) > 1e-9;
+    for (const e of list) {
+      if (e.handle && clipHandles.has(e.handle.toUpperCase())) continue;
+      if (e.type === 'VIEWPORT' && e.frozenH) { e.frozen = e.frozenH.map((hh) => doc._layerH.get(hh)).filter(Boolean); delete e.frozenH; }
+      if (hasShift) { if (e.type === 'VIEWPORT') { e.c = G.add(e.c, L.shift); if (e.clip) e.clip = e.clip.map((q) => G.add(q, L.shift)); } else T[e.type]?.transform?.(e, m, doc); }
+      e.space = L.name; doc.defaults(e); doc._insert(e); total++;
+    }
+    const nl = newLayout(L.name, L.page); nl.inited = list.length > 0; doc.layouts.push(nl);
+  }
+  stats.paper = total;
+}
 function common(o) {
   const e = { layer: gv(o, 8) ?? '0' };
   const c = gv(o, 62); e.color = c != null ? Math.abs(parseInt(c)) : 256;
@@ -206,6 +270,7 @@ function convertList(list, doc, stats, inBlock) {
       continue;
     }
     if (o.type === 'SEQEND' || o.type === 'VERTEX' || o.type === 'ENDBLK') continue;
+    if (o.type === 'VIEWPORT' && !inBlock) continue;
     try {
       const e = convEnt(o, doc);
       if (e) { if (Array.isArray(e)) for (const x of e) out.push(x); else out.push(e); } else stats.skipped[o.type] = (stats.skipped[o.type] || 0) + 1;
@@ -324,6 +389,16 @@ function convEnt(o, doc) {
       break;
     }
     case 'HATCH': e = convHatch(o, c); break;
+    case 'VIEWPORT': {
+      if (gi(o, 69) === 1) return [];
+      const w = gf(o, 40), hh = gf(o, 41), vh = gf(o, 45, hh) || hh; if (!(w > 0 && hh > 0)) return [];
+      const fl = gi(o, 90);
+      e = { ...c, type: 'VIEWPORT', c: p10(), w, h: hh, vc: P(gf(o, 12), gf(o, 22)), vs: hh / vh, on: !(fl & 131072) && gi(o, 68, 1) !== 0 || !!(fl & 131072) === false, locked: !!(fl & 16384), frozen: [] };
+      e.on = !(fl & 131072);
+      const fz = gall(o, 331).map((x) => x.trim().toUpperCase()); if (fz.length) e.frozenH = fz;
+      if (gv(o, 340) && (fl & 65536)) e._clipH = gv(o, 340).trim().toUpperCase();
+      break;
+    }
     case 'IMAGE': case 'WIPEOUT': {
       const ins = p10(), u = p11(), v = P(gf(o, 12), gf(o, 22)), sz = P(gf(o, 13, 1), gf(o, 23, 1));
       const W = G.mul(u, sz.x), H = G.mul(v, sz.y);
@@ -484,11 +559,15 @@ function writeDxfCore(doc, dimMap) {
   for (const l of ltypes) ltypeH[l] = w.handle();
   const layerH = {}; for (const l of doc.layers.keys()) layerH[l] = w.handle();
   const styleH = w.handle(), vportH = w.handle(), appH = w.handle(), dimH = w.handle();
-  const blocks = [['*Model_Space', null], ['*Paper_Space', null], ...[...doc.blocks.keys()].filter((n) => !/^\*(Model|Paper)_Space/i.test(n)).map((n) => [n, doc.blocks.get(n)])];
+  const lays = doc.layouts && doc.layouts.length ? doc.layouts : [{ name: 'Layout1', page: { paper: 'ISO A3', landscape: true } }];
+  const psName = (i) => (i === 0 ? '*Paper_Space' : '*Paper_Space' + (i - 1));
+  // blocos de espaço papel: o 1º layout fica em ENTITIES (67=1); os demais dentro do seu bloco *Paper_SpaceN
+  const blocks = [['*Model_Space', null], ...lays.map((L, i) => [psName(i), i === 0 ? null : { name: psName(i), base: P(0, 0), ents: doc.spaceEnts ? doc.spaceEnts(L.name) : [], paper: true }]), ...[...doc.blocks.keys()].filter((n) => !/^\*(Model|Paper)_Space/i.test(n)).map((n) => [n, doc.blocks.get(n)])];
   // gera blocos anônimos para cotas criadas no app
   const brH = {}, blkH = {}, endH = {};
   for (const [n] of blocks) { brH[n] = w.handle(); blkH[n] = w.handle(); endH[n] = w.handle(); }
-  const dictRoot = w.handle(), dictGroup = w.handle(), dictLayout = w.handle(), layoutModel = w.handle(), layoutPaper = w.handle();
+  const dictRoot = w.handle(), dictGroup = w.handle(), dictLayout = w.handle(), layoutModel = w.handle();
+  const layoutH = lays.map(() => w.handle());
   const ents = []; // [ent, ownerName]
   // HEADER
   w.g(0, 'SECTION'); w.g(2, 'HEADER');
@@ -559,27 +638,35 @@ function writeDxfCore(doc, dimMap) {
   tableStart('BLOCK_RECORD', blocks.length);
   for (const [n] of blocks) {
     w.g(0, 'BLOCK_RECORD'); w.g(5, brH[n]); w.g(330, H.BLOCK_RECORD); w.g(100, 'AcDbSymbolTableRecord'); w.g(100, 'AcDbBlockTableRecord'); w.g(2, n);
-    if (n === '*Model_Space') w.g(340, layoutModel); else if (n === '*Paper_Space') w.g(340, layoutPaper); else w.g(340, 0);
+    const li = blocks.findIndex(([bn]) => bn === n) - 1;
+    if (n === '*Model_Space') w.g(340, layoutModel); else if (/^\*Paper_Space/.test(n) && li >= 0 && li < lays.length) w.g(340, layoutH[li]); else w.g(340, 0);
     w.g(70, 0); w.g(280, 1); w.g(281, 0);
   }
   w.g(0, 'ENDTAB');
   w.g(0, 'ENDSEC');
   // contexto de escrita
-  const ctx = { w, doc, ltypes, layerH, brH, styleH, dimH, dimBlocks: dimMap, handles: new Map(), msOwner: brH['*Model_Space'], reactors: new Map(), groupH: new Map() };
+  const ctx = { w, doc, ltypes, layerH, brH, styleH, dimH, dimBlocks: dimMap, handles: new Map(), msOwner: brH['*Model_Space'], owners: new Set([brH['*Model_Space'], ...lays.map((_, i) => brH[psName(i)])]), reactors: new Map(), groupH: new Map(), paper: false, vpId: 2 };
   for (const g of (doc.groups || new Map()).values()) { const gh = w.handle(); ctx.groupH.set(g.name, gh); for (const id of g.ids) { if (!ctx.reactors.has(id)) ctx.reactors.set(id, []); ctx.reactors.get(id).push(gh); } }
   // BLOCKS
   w.g(0, 'SECTION'); w.g(2, 'BLOCKS');
   for (const [n, b] of blocks) {
-    const ps = n === '*Paper_Space';
+    const ps = /^\*Paper_Space/.test(n);
+    ctx.paper = !!(b && b.paper); ctx.vpId = 2; ctx.layoutOfBlock = b && b.paper ? lays[blocks.findIndex(([bn]) => bn === n) - 1] : null;
     w.g(0, 'BLOCK'); w.g(5, blkH[n]); w.g(330, brH[n]); w.g(100, 'AcDbEntity'); if (ps) w.g(67, 1); w.g(8, '0'); w.g(100, 'AcDbBlockBegin');
     w.g(2, n); w.g(70, b && /^\*/.test(n) ? 1 : 0); w.pt(10, b ? b.base : P(0, 0)); w.g(3, n); w.g(1, '');
+    if (ctx.paper) writeOverallVp(ctx, ctx.layoutOfBlock, brH[n]);
     if (b) for (const e of b.ents) writeEnt(ctx, e, brH[n]);
+    ctx.paper = false;
     w.g(0, 'ENDBLK'); w.g(5, endH[n]); w.g(330, brH[n]); w.g(100, 'AcDbEntity'); if (ps) w.g(67, 1); w.g(8, '0'); w.g(100, 'AcDbBlockEnd');
   }
   w.g(0, 'ENDSEC');
   // ENTITIES
   w.g(0, 'SECTION'); w.g(2, 'ENTITIES');
-  for (const e of doc.ents.values()) writeEnt(ctx, e, brH['*Model_Space']);
+  for (const e of doc.ents.values()) if (!e.space) writeEnt(ctx, e, brH['*Model_Space']);
+  ctx.paper = true; ctx.vpId = 2; ctx.layoutOfBlock = lays[0];
+  writeOverallVp(ctx, lays[0], brH['*Paper_Space']);
+  if (doc.spaceEnts) for (const e of doc.spaceEnts(lays[0].name)) writeEnt(ctx, e, brH['*Paper_Space']);
+  ctx.paper = false;
   w.g(0, 'ENDSEC');
   void ents;
   // OBJECTS
@@ -591,13 +678,21 @@ function writeDxfCore(doc, dimMap) {
   for (const x of groups) { w.g(3, x.g.name); w.g(350, x.h); }
   for (const x of groups) { w.g(0, 'GROUP'); w.g(5, x.h); w.g(330, dictGroup); w.g(100, 'AcDbGroup'); w.g(300, x.g.desc || ''); w.g(70, x.g.name.startsWith('*') ? 1 : 0); w.g(71, 1); for (const hh of x.hs) w.g(340, hh); }
   w.g(0, 'DICTIONARY'); w.g(5, dictLayout); w.g(330, dictRoot); w.g(100, 'AcDbDictionary'); w.g(281, 1);
-  w.g(3, 'Model'); w.g(350, layoutModel); w.g(3, 'Layout1'); w.g(350, layoutPaper);
-  for (const [lh, name, br, ord] of [[layoutModel, 'Model', brH['*Model_Space'], 0], [layoutPaper, 'Layout1', brH['*Paper_Space'], 1]]) {
-    w.g(0, 'LAYOUT'); w.g(5, lh); w.g(330, dictLayout); w.g(100, 'AcDbPlotSettings'); w.g(1, ''); w.g(4, ''); w.g(6, '');
-    w.g(40, 0); w.g(41, 0); w.g(42, 0); w.g(43, 0); w.g(44, 0); w.g(45, 0); w.g(46, 0); w.g(47, 0); w.g(48, 0); w.g(49, 0); w.g(140, 0); w.g(141, 0); w.g(142, 1); w.g(143, 1);
-    w.g(70, 688); w.g(72, 1); w.g(73, 0); w.g(74, 5); w.g(7, ''); w.g(75, 16); w.g(147, 1); w.g(148, 0); w.g(149, 0);
-    w.g(100, 'AcDbLayout'); w.g(1, name); w.g(70, 1); w.g(71, ord); w.g(10, 0); w.g(20, 0); w.g(11, 420); w.g(21, 297); w.g(12, 0); w.g(22, 0); w.g(32, 0);
-    w.g(14, 0); w.g(24, 0); w.g(34, 0); w.g(15, 0); w.g(25, 0); w.g(35, 0); w.g(146, 0); w.g(13, 0); w.g(23, 0); w.g(33, 0); w.g(16, 1); w.g(26, 0); w.g(36, 0); w.g(17, 0); w.g(27, 1); w.g(37, 0); w.g(76, 0); w.g(330, br);
+  w.g(3, 'Model'); w.g(350, layoutModel); lays.forEach((L, i) => { w.g(3, L.name); w.g(350, layoutH[i]); });
+  const layoutRows = [[layoutModel, 'Model', brH['*Model_Space'], 0, null], ...lays.map((L, i) => [layoutH[i], L.name, brH[psName(i)], i + 1, L])];
+  for (const [lh, name, br, ord, L] of layoutRows) {
+    const pg = L ? L.page || {} : {};
+    const [pw, ph] = L ? pageSize({ paper: pg.paper || 'ISO A3', custom: pg.custom, landscape: pg.landscape !== false }) : [420, 297];
+    const pname = L ? `${(pg.custom ? 'Personalizado' : (pg.paper || 'ISO A3')).replace(/[^A-Za-z0-9]+/g, '_')}_(${pw.toFixed(2)}_x_${ph.toFixed(2)}_MM)` : '';
+    const sc = L ? (pg.scale || 1) : 1;
+    w.g(0, 'LAYOUT'); w.g(5, lh); w.g(330, dictLayout); w.g(100, 'AcDbPlotSettings'); w.g(1, ''); w.g(2, L ? 'DWG To PDF.pc3' : ''); w.g(4, pname); w.g(6, '');
+    w.g(40, 0); w.g(41, 0); w.g(42, 0); w.g(43, 0); w.g(44, L ? pw : 0); w.g(45, L ? ph : 0); w.g(46, (L && pg.offX) || 0); w.g(47, (L && pg.offY) || 0); w.g(48, 0); w.g(49, 0); w.g(140, 0); w.g(141, 0);
+    w.g(142, sc >= 1 ? sc : 1); w.g(143, sc >= 1 ? 1 : 1 / sc);
+    w.g(70, (L && pg.fit ? 0 : 0) | 688 | (L && pg.center ? 4 : 0) | (L && pg.lwt === false ? 0 : 0)); w.g(72, 1); w.g(73, L && pg.upside ? 2 : 0);
+    w.g(74, !L ? 5 : { layout: 5, extents: 1, display: 0, window: 4 }[pg.area] ?? 5); w.g(7, L ? ({ mono: 'monochrome.ctb', gray: 'grayscale.ctb' }[pg.ctb] || '') : '');
+    w.g(75, L && pg.fit ? 0 : 16); w.g(147, 1); w.g(148, 0); w.g(149, 0);
+    w.g(100, 'AcDbLayout'); w.g(1, name); w.g(70, 1); w.g(71, ord); w.g(10, 0); w.g(20, 0); w.g(11, L ? pw : 420); w.g(21, L ? ph : 297); w.g(12, 0); w.g(22, 0); w.g(32, 0);
+    w.g(14, 0); w.g(24, 0); w.g(34, 0); w.g(15, L ? pw : 0); w.g(25, L ? ph : 0); w.g(35, 0); w.g(146, 0); w.g(13, 0); w.g(23, 0); w.g(33, 0); w.g(16, 1); w.g(26, 0); w.g(36, 0); w.g(17, 0); w.g(27, 1); w.g(37, 0); w.g(76, 0); w.g(330, br);
   }
   w.g(0, 'ENDSEC');
   w.g(0, 'EOF');
@@ -615,12 +710,26 @@ function colorTags(ctx, e) {
   if (e.tc != null) w.g(420, e.tc);
 }
 function head(ctx, e, type, owner, sub) {
-  const w = ctx.w; const h = w.handle(); const top = ctx.handles && e.id && owner === ctx.msOwner; if (top) ctx.handles.set(e.id, h);
+  const w = ctx.w; const h = w.handle(); const top = ctx.handles && e.id && (ctx.owners ? ctx.owners.has(owner) : owner === ctx.msOwner); if (top) ctx.handles.set(e.id, h);
   w.g(0, type); w.g(5, h);
   const rs = top && ctx.reactors ? ctx.reactors.get(e.id) : null;
   if (rs) { w.g(102, '{ACAD_REACTORS'); for (const r of rs) w.g(330, r); w.g(102, '}'); }
-  w.g(330, owner); w.g(100, 'AcDbEntity'); colorTags(ctx, e); if (sub) w.g(100, sub);
+  w.g(330, owner); w.g(100, 'AcDbEntity'); if (ctx.paper) w.g(67, 1); colorTags(ctx, e); if (sub) w.g(100, sub);
   return h;
+}
+// viewport geral do papel (id 1), obrigatória em cada layout
+function writeOverallVp(ctx, L, owner) {
+  const w = ctx.w; const [pw, ph] = pageSize((L && L.page) || { paper: 'ISO A3', landscape: true });
+  w.g(0, 'VIEWPORT'); w.g(5, w.handle()); w.g(330, owner); w.g(100, 'AcDbEntity'); w.g(67, 1); w.g(8, '0'); w.g(100, 'AcDbViewport');
+  w.pt(10, P(pw / 2, ph / 2)); w.g(40, pw * 1.1); w.g(41, ph * 1.1); w.g(68, 1); w.g(69, 1);
+  vpTail(w, P(pw / 2, ph / 2), ph * 1.1, [], 32864, null);
+}
+function vpTail(w, vc, vh, frozenH, flags, clipH) {
+  w.g(12, vc.x); w.g(22, vc.y); w.g(13, 0); w.g(23, 0); w.g(14, 10); w.g(24, 10); w.g(15, 10); w.g(25, 10); w.g(16, 0); w.g(26, 0); w.g(36, 1); w.g(17, 0); w.g(27, 0); w.g(37, 0);
+  w.g(42, 50); w.g(43, 0); w.g(44, 0); w.g(45, vh); w.g(50, 0); w.g(51, 0); w.g(72, 1000);
+  for (const fh of frozenH) w.g(331, fh);
+  w.g(90, flags); if (clipH) w.g(340, clipH);
+  w.g(1, ''); w.g(281, 0); w.g(71, 1); w.g(74, 0); w.g(110, 0); w.g(120, 0); w.g(130, 0); w.g(111, 1); w.g(121, 0); w.g(131, 0); w.g(112, 0); w.g(122, 1); w.g(132, 0); w.g(79, 0); w.g(146, 0);
 }
 function writeEnt(ctx, e, owner) {
   const w = ctx.w, doc = ctx.doc;
@@ -688,6 +797,18 @@ function writeEnt(ctx, e, owner) {
       break;
     }
     case 'HATCH': writeHatch(ctx, e, owner); break;
+    case 'VIEWPORT': {
+      if (!ctx.paper) return;
+      let clipH = null;
+      if (e.clip && e.clip.length >= 3) { // contorno de recorte: polilinha no papel referenciada pela viewport
+        clipH = head(ctx, { ...e, id: null }, 'LWPOLYLINE', owner, 'AcDbPolyline'); w.g(90, e.clip.length); w.g(70, 1); for (const q of e.clip) { w.g(10, q.x); w.g(20, q.y); }
+      }
+      head(ctx, e, 'VIEWPORT', owner, 'AcDbViewport');
+      w.pt(10, e.c); w.g(40, e.w); w.g(41, e.h); w.g(68, e.on === false ? 0 : ctx.vpId); w.g(69, ctx.vpId++);
+      const fz = (e.frozen || []).map((n) => ctx.layerH[n]).filter(Boolean);
+      vpTail(w, e.vc, e.h / e.vs, fz, 32864 | (e.locked ? 16384 : 0) | (clipH ? 65536 : 0) | (e.on === false ? 131072 : 0), clipH);
+      break;
+    }
     case 'IMAGE': case 'WIPEOUT': // grava contorno como polilinha
       writeEnt(ctx, { ...e, type: 'LWPOLYLINE', closed: true }, owner); break;
   }
@@ -788,7 +909,7 @@ function writeDxfR12(doc) {
   g(0, 'SECTION'); g(2, 'BLOCKS');
   for (const b of doc.blocks.values()) { if (b.name.startsWith('*')) continue; g(0, 'BLOCK'); g(8, '0'); g(2, b.name); g(70, 0); ptw(10, b.base); g(3, b.name); b.ents.forEach(emit); g(0, 'ENDBLK'); g(8, '0'); }
   g(0, 'ENDSEC');
-  g(0, 'SECTION'); g(2, 'ENTITIES'); for (const e of doc.ents.values()) emit(e); g(0, 'ENDSEC'); g(0, 'EOF');
+  g(0, 'SECTION'); g(2, 'ENTITIES'); for (const e of doc.ents.values()) if (!e.space) emit(e); g(0, 'ENDSEC'); g(0, 'EOF');
   return asciiOnly(o.join('\r\n') + '\r\n');
 }
 export { isSimilar, mtextLayout };

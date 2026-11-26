@@ -2,7 +2,9 @@
 import * as G from './geom.js';
 import { Doc } from './doc.js';
 import { T, cloneEnt, textCorners, TYPE_NAMES } from './entities.js';
-import { Renderer, renderDoc } from './render.js';
+import { Renderer, renderDoc, renderLayout } from './render.js';
+import { pageSize } from './doc.js';
+import { vpOutline } from './entities.js';
 const { P, M, ap, dist, add, sub } = G;
 
 export class Cancel extends Error { constructor() { super('cancel'); } }
@@ -57,14 +59,66 @@ export class App {
     this.dpr = window.devicePixelRatio || 1;
     this.W = Math.max(1, r.width); this.H = Math.max(1, r.height);
     for (const c of [this.cScene, this.cSel, this.cOver]) { c.width = Math.round(this.W * this.dpr); c.height = Math.round(this.H * this.dpr); c.style.width = this.W + 'px'; c.style.height = this.H + 'px'; }
-    this.setLayout(this.layout, true);
+    if (this.space && this.space !== 'MODEL') { const v = this.vps[0]; v.x = 0; v.y = 0; v.w = this.W; v.h = this.H; } else this.setLayout(this.layout, true);
     this.sceneDocDirty = true; this.redraw();
   }
-  get view() { return this.vps[this.ai].view; }
-  set view(v) { this.vps[this.ai].view = v; }
+  get view() { return this.msvp ? this.msView() : this.vps[this.ai].view; }
+  set view(v) { if (this.msvp) { const m = this.msView(); m.scale = v.scale; m.cx = v.cx; m.cy = v.cy; } else this.vps[this.ai].view = v; }
+  // vista efetiva do modelo vista por dentro da viewport ativa (zoom/pan alteram a viewport, ou o papel se ela estiver travada)
+  msView() {
+    const app = this, vp = this.msvp, pv = () => app.vps[app.ai].view;
+    const touch = () => { app.doc.dirty = true; };
+    return {
+      get scale() { return pv().scale * vp.vs; },
+      set scale(s) { if (vp.locked) pv().scale = s / vp.vs; else { vp.vs = s / pv().scale; touch(); } },
+      get cx() { return vp.vc.x + (pv().cx - vp.c.x) / vp.vs; },
+      set cx(v) { if (vp.locked) pv().cx = vp.c.x + (v - vp.vc.x) * vp.vs; else { vp.vc = P(v - (pv().cx - vp.c.x) / vp.vs, vp.vc.y); touch(); } },
+      get cy() { return vp.vc.y + (pv().cy - vp.c.y) / vp.vs; },
+      set cy(v) { if (vp.locked) pv().cy = vp.c.y + (v - vp.vc.y) * vp.vs; else { vp.vc = P(vp.vc.x, v - (pv().cy - vp.c.y) / vp.vs); touch(); } },
+    };
+  }
+  // matriz papel -> tela (dispositivo) do layout atual
+  paperMatrix() { const v = this.vps[0], w = v.view, s = w.scale * this.dpr; return [s, 0, 0, -s, (v.x + v.w / 2 - w.cx * w.scale) * this.dpr, (v.y + v.h / 2 + w.cy * w.scale) * this.dpr]; }
+  paperPt(sp) { const v = this.vps[0], w = v.view; return P((sp.x - v.x - v.w / 2) / w.scale + w.cx, w.cy - (sp.y - v.y - v.h / 2) / w.scale); }
+  curLayout() { return this.space && this.space !== 'MODEL' ? this.doc.layout(this.space) : null; }
+  // troca entre Modelo e um layout
+  setSpace(name) {
+    if (this.pending) { const p = this.pending; this.pending = null; p.reject(new Cancel()); }
+    const d = this.doc; const cur = this.space || 'MODEL';
+    if (cur === name && !(name !== 'MODEL' && this.msvp)) return;
+    if (cur === 'MODEL') this.modelVps = { layout: this.layout, ai: this.ai, vps: this.vps };
+    this.msvp = null; this.sel = new Set(); this.hover = null; this.preview = []; this.hotGrip = null; this.viewStack = [];
+    if (name === 'MODEL') {
+      const m = this.modelVps || { layout: 'single', ai: 0, vps: [{ x: 0, y: 0, w: this.W, h: this.H, view: { cx: 0, cy: 0, scale: 4 } }] };
+      this.space = 'MODEL'; d.curSpace = 'MODEL'; this.vps = m.vps; this.ai = m.ai; this.layout = m.layout; this.setLayout(this.layout, true);
+    } else {
+      const L = d.layout(name); if (!L) return;
+      this.space = name; d.curSpace = name;
+      if (!L.view) { const [pw, ph] = pageSize(L.page); L.view = { cx: pw / 2, cy: ph / 2, scale: Math.min(this.W / (pw * 1.12), this.H / (ph * 1.12)) }; }
+      this.vps = [{ x: 0, y: 0, w: this.W, h: this.H, view: L.view }]; this.ai = 0;
+      if (!L.inited) { L.inited = true; this.onInitLayout && this.onInitLayout(L); }
+    }
+    this.backView = null; this.sceneDocDirty = true; this.redraw(); this.lastVersion = -1;
+    this.onSelChange && this.onSelChange(); this.onSpace && this.onSpace();
+  }
+  // entra no espaço modelo pela viewport (MSPACE) ou volta ao papel (PSPACE)
+  mspace(vp) {
+    if (!this.curLayout() || !vp || vp.on === false) return false;
+    if (this.pending) { const p = this.pending; this.pending = null; p.reject(new Cancel()); }
+    this.msvp = vp; this.doc.curSpace = 'MODEL'; this.sel = new Set(); this.hover = null; this.viewStack = [];
+    this.backView = null; this.sceneDocDirty = true; this.redraw(); this.onSelChange && this.onSelChange(); this.onSpace && this.onSpace(); return true;
+  }
+  pspace() {
+    if (!this.msvp) return;
+    if (this.pending) { const p = this.pending; this.pending = null; p.reject(new Cancel()); }
+    this.msvp = null; this.doc.curSpace = this.space; this.sel = new Set(); this.hover = null; this.viewStack = [];
+    this.backView = null; this.sceneDocDirty = true; this.redraw(); this.onSelChange && this.onSelChange(); this.onSpace && this.onSpace();
+  }
+  vpAtPaper(pp) { const L = this.curLayout(); if (!L) return null; const vs = this.doc.spaceEnts(L.name).filter((e) => e.type === 'VIEWPORT' && e.on !== false && this.doc.visible(e, L.name)); for (let i = vs.length - 1; i >= 0; i--) if (G.ptInPoly(pp, vpOutline(vs[i]))) return vs[i]; return null; }
   get vp() { return this.vps[this.ai]; }
   // configurações de janelas: single, v2 (2 verticais), h2 (2 horizontais), three (1 grande + 2), four
   setLayout(name, keep) {
+    if (this.space && this.space !== 'MODEL') return;
     const W = this.W, H = this.H, w2 = Math.floor(W / 2), h2 = Math.floor(H / 2);
     const R = {
       single: [[0, 0, W, H]], v2: [[0, 0, w2, H], [w2, 0, W - w2, H]], h2: [[0, 0, W, h2], [0, h2, W, H - h2]],
@@ -88,6 +142,7 @@ export class App {
     for (let i = 0; i < this.vps.length; i++) {
       this.ai = i; const v = this.vps[i];
       c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.beginPath(); c.rect(v.x * d, v.y * d, v.w * d, v.h * d); c.clip();
+      if (this.msvp) { const o = vpOutline(this.msvp).map((q) => ap(this.paperMatrix(), q)); c.beginPath(); c.moveTo(o[0].x, o[0].y); for (const q of o) c.lineTo(q.x, q.y); c.closePath(); c.clip(); }
       try { fn(i); } finally { c.restore(); }
     }
     this.ai = keep;
@@ -95,12 +150,19 @@ export class App {
   // troca o desenho ativo (abas de arquivos)
   switchDoc(doc, state) {
     if (this.pending) { const p = this.pending; this.pending = null; p.reject(new Cancel()); }
-    this.doc = doc; this.sel = new Set(); this.hover = null; this.preview = []; this.hotGrip = null; this.trackPts = []; this.viewStack = [];
+    if (this.space && this.space !== 'MODEL') { this.msvp = null; this.doc.curSpace = 'MODEL'; if (this.modelVps) { this.vps = this.modelVps.vps; this.ai = this.modelVps.ai; this.layout = this.modelVps.layout; } }
+    this.space = 'MODEL'; this.msvp = null; this.modelVps = null;
+    this.doc = doc; doc.curSpace = 'MODEL'; this.sel = new Set(); this.hover = null; this.preview = []; this.hotGrip = null; this.trackPts = []; this.viewStack = [];
     if (state && state.vps) { this.layout = state.layout || 'single'; this.vps = state.vps.map((v) => ({ ...v, view: { ...v.view } })); this.ai = Math.min(state.ai || 0, this.vps.length - 1); this.setLayout(this.layout, true); }
     this.lastVersion = -1; this.backView = null; this.sceneDocDirty = true; this.redraw();
     this.onSelChange && this.onSelChange();
+    if (state && state.space && state.space !== 'MODEL' && doc.layout(state.space)) this.setSpace(state.space);
+    this.onSpace && this.onSpace();
   }
-  viewState() { return { layout: this.layout, ai: this.ai, vps: this.vps.map((v) => ({ ...v, view: { ...v.view } })) }; }
+  viewState() {
+    const m = this.space !== 'MODEL' && this.modelVps ? this.modelVps : { layout: this.layout, ai: this.ai, vps: this.vps };
+    return { layout: m.layout, ai: m.ai, vps: m.vps.map((v) => ({ ...v, view: { ...v.view } })), space: this.space || 'MODEL' };
+  }
   // executa um comando e responde automaticamente aos primeiros prompts (variantes da faixa de opções)
   runWith(cmd, ...inputs) { this.inputQueue = inputs.slice(); this.runImmediate(cmd); }
   redraw() { this.dirty.scene = this.dirty.sel = this.dirty.over = true; }
@@ -133,7 +195,7 @@ export class App {
     if (this.doc.version !== this.lastVersion) { this.lastVersion = this.doc.version; this.dirty.scene = this.dirty.sel = true; this.sceneDocDirty = true; this.onDocChange && this.onDocChange(); }
     if (this.dirty.scene) {
       this.dirty.scene = false;
-      const viewOnly = !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1;
+      const viewOnly = !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1 && (this.space || 'MODEL') === 'MODEL';
       this.sceneDocDirty = false;
       if (viewOnly) { this.blitScene(); clearTimeout(this._fullT); this._fullT = setTimeout(() => { this.renderScene(); this.dirty.sel = true; }, 150); }
       else { clearTimeout(this._fullT); this.renderScene(); }
@@ -141,7 +203,7 @@ export class App {
     if (this.dirty.sel) { this.dirty.sel = false; this.renderSel(); }
     if (this.dirty.over) { this.dirty.over = false; this.renderOver(); }
   }
-  isDark() { const c = this.settings.bg; const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16); return (r * 0.3 + g * 0.59 + b * 0.11) < 128; }
+  isDark() { if (this.space && this.space !== 'MODEL') return false; const c = this.settings.bg; const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16); return (r * 0.3 + g * 0.59 + b * 0.11) < 128; }
   // durante pan/zoom em desenhos pesados: reaproveita o último quadro transformado
   blitScene() {
     const v0 = this.backView, v1 = this.view, d = this.dpr;
@@ -159,6 +221,12 @@ export class App {
   }
   renderTo(c) {
     const t0 = performance.now();
+    const L = this.curLayout();
+    if (L) {
+      c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.layoutBg || '#55595f'; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
+      renderLayout(c, this.doc, L, this.paperMatrix(), { screen: true, lwt: this.settings.lwt, dpr: this.dpr, lodPx: 0.6 });
+      this.lastRenderMs = performance.now() - t0; return;
+    }
     c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.bg; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
     let n = 0;
     this.eachVp(c, () => {
@@ -228,6 +296,7 @@ export class App {
         r.ctx.beginPath(); r.key = null; r.drawEnt(this.hover, this.devMatrix(), null, this.viewBB()); r.flush();
       }
     });
+    if (this.msvp) { const o = vpOutline(this.msvp).map((q) => ap(this.paperMatrix(), q)); c.setTransform(1, 0, 0, 1, 0, 0); c.strokeStyle = '#2f7de0'; c.lineWidth = 3 * d; c.beginPath(); c.moveTo(o[0].x, o[0].y); for (const q of o) c.lineTo(q.x, q.y); c.closePath(); c.stroke(); }
     if (this.vps.length > 1) {
       c.setTransform(1, 0, 0, 1, 0, 0);
       this.vps.forEach((v, i) => { if (i === this.ai) return; c.strokeStyle = 'rgba(160,170,185,0.55)'; c.lineWidth = d; c.strokeRect(v.x * d + 0.5, v.y * d + 0.5, v.w * d - 1, v.h * d - 1); });
@@ -488,6 +557,7 @@ export class App {
       el.setPointerCapture(ev.pointerId);
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
       if (this.dirty.move || !this.cursorScreen || this.cursorScreen.x !== sp.x || this.cursorScreen.y !== sp.y) { this.dirty.move = false; this.updateCursor(sp); }
+      if (this.msvp && ev.button === 0) { const vp = this.vpAtPaper(this.paperPt(sp)); if (vp && vp !== this.msvp) { this.msvp = vp; this._msv = null; this.redraw(); this.updateCursor(sp); this.onSpace && this.onSpace(); return; } }
       if (this.vps.length > 1) { const vi = this.vpAt(sp); if (vi !== this.ai) { this.ai = vi; this.redraw(); this.updateCursor(sp); if (ev.button !== 1) return; } }
       if (ev.button === 1 || (ev.button === 0 && this.panMode)) {
         ev.preventDefault();
@@ -515,6 +585,12 @@ export class App {
     el.addEventListener('dblclick', (ev) => {
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
       if (this.pending || this.cmdRunning) return;
+      if (this.curLayout()) {
+        // clique duplo dentro de uma viewport entra no modelo; fora dela volta ao papel
+        const pp = this.paperPt(sp); const vp = this.vpAtPaper(pp);
+        if (this.msvp && !vp) { this.pspace(); return; }
+        if (!this.msvp && vp && !this.pick(sp, (x) => x.type !== 'VIEWPORT')) { this.mspace(vp); return; }
+      }
       const e = this.pick(sp);
       if (e && (e.type === 'TEXT' || e.type === 'MTEXT' || e.type === 'DIMENSION' || e.type === 'ATTRIB')) this.onEditText && this.onEditText(e);
       else if (e) { this.setSel([e]); this.onShowProps && this.onShowProps(); }

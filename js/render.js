@@ -2,6 +2,13 @@
 import * as G from './geom.js';
 import { T, textCorners, mtextLayout, cleanText, dispStr, textWidth, FONT, CAP, loopPath, solidOrder, insMatrix, makePattern } from './entities.js';
 import { aciCss, trueCss } from './colors.js';
+import { vpMatrix, vpOutline } from './entities.js';
+import { pageSize } from './doc.js';
+function toGray(css) {
+  let r, g, b; const m = css.match(/rgb\((\d+),(\d+),(\d+)\)/);
+  if (m) [r, g, b] = [+m[1], +m[2], +m[3]]; else if (css[0] === '#') { r = parseInt(css.slice(1, 3), 16); g = parseInt(css.slice(3, 5), 16); b = parseInt(css.slice(5, 7), 16); } else return css;
+  const y = Math.round(r * 0.3 + g * 0.59 + b * 0.11); const v = Math.min(y, 200); return `rgb(${v},${v},${v})`;
+}
 const { P, M, ap, apv } = G;
 
 const IMGCACHE = new Map();
@@ -18,6 +25,10 @@ export class Renderer {
     this.key = null; this.pending = false; this.lodPx = opts.lodPx ?? 0.6;
     this.forcedWidth = opts.forcedWidth || 0;
     this.dashScale = opts.dashScale ?? 1;
+    this.space = opts.space; // espaço a desenhar (padrão: o atual do documento)
+    this.vpFrozen = opts.vpFrozen || null; // camadas congeladas na viewport
+    this.plotting = !!opts.plotting; // na plotagem, camadas "não plotar" ficam de fora
+    this.gray = !!opts.gray;
   }
   flush() {
     if (this.pending) { const c = this.ctx; c.setTransform(1, 0, 0, 1, 0, 0); c.stroke(); this.pending = false; }
@@ -42,6 +53,7 @@ export class Renderer {
     let lw = e.lw ?? -1;
     if (lw === -1) lw = L.lw; else if (lw === -2) lw = par ? par.lw : -3;
     let css = this.mono || (tc != null ? trueCss(tc) : aciCss(color, this.dark));
+    if (this.gray && !this.mono) css = toGray(css);
     return { color, tc, ltype: lt, lw, css, layer: L.name, lts: (e.ltscale || 1) * (par ? par.lts : 1) };
   }
   applyStroke(st, Tm) {
@@ -69,7 +81,9 @@ export class Renderer {
   }
   drawEnt(e, Tm, par, viewBB) {
     const doc = this.doc;
-    if (!par && !doc.visible(e)) return;
+    if (!par && !doc.visible(e, this.space ?? doc.curSpace)) return;
+    if (!par && this.vpFrozen && this.vpFrozen.has(e.layer)) return;
+    if (this.plotting) { const L = doc.layers.get(e.layer); if (L && L.plot === false && (!par || e.layer !== '0')) return; }
     if (par && e.layer !== '0') { const L = doc.layers.get(e.layer); if (L && (!L.on || L.frozen)) return; }
     const h = T[e.type]; if (!h) return;
     if (e.type === 'ATTDEF' && par) return;
@@ -279,4 +293,45 @@ export function renderDoc(r, doc, Tm, viewBB) {
   }
   r.flush();
   return list.length;
+}
+
+// ---------- Layout (espaço papel) ----------
+// Tp: matriz papel(mm) -> saída. o: opções do Renderer + {screen, active (viewport ativa), sheet}
+export function renderLayout(c, doc, layout, Tp, o = {}) {
+  const [pw, ph] = pageSize(layout.page);
+  const P0 = G.ap(Tp, P(0, 0)), P1 = G.ap(Tp, P(pw, ph));
+  if (o.screen) {
+    const x = Math.min(P0.x, P1.x), y = Math.min(P0.y, P1.y), w = Math.abs(P1.x - P0.x), h = Math.abs(P1.y - P0.y);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(x + 4 * (o.dpr || 1), y + 4 * (o.dpr || 1), w, h);
+    c.fillStyle = '#ffffff'; c.fillRect(x, y, w, h);
+    const m = layout.page.margin ?? 5; const a = G.ap(Tp, P(m, m)), b = G.ap(Tp, P(pw - m, ph - m));
+    c.strokeStyle = 'rgba(80,80,80,0.6)'; c.lineWidth = 1; c.setLineDash([4 * (o.dpr || 1), 3 * (o.dpr || 1)]);
+    c.strokeRect(Math.min(a.x, b.x) + 0.5, Math.min(a.y, b.y) + 0.5, Math.abs(b.x - a.x), Math.abs(b.y - a.y)); c.setLineDash([]);
+  }
+  const ents = doc.spaceEnts(layout.name);
+  const vps = ents.filter((e) => e.type === 'VIEWPORT');
+  const base = { dark: false, bg: '#ffffff', ...o };
+  const drawPaper = () => {
+    const r = new Renderer(c, doc, { ...base, space: layout.name });
+    r.ctx.beginPath(); r.key = null;
+    for (const e of ents) { if (o.hidePaper && e.type !== 'VIEWPORT') continue; r.drawEnt(e, Tp, null, null); }
+    r.flush();
+  };
+  const psLast = layout.page.psLast !== false;
+  if (!psLast) drawPaper();
+  for (const vp of vps) {
+    if (vp.on === false) continue;
+    if (o.plotting) { const L = doc.layers.get(vp.layer); if (L && (L.frozen || !L.on)) continue; }
+    else if (!doc.visible(vp, layout.name)) continue;
+    const out = vpOutline(vp).map((q) => G.ap(Tp, q));
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.beginPath(); c.moveTo(out[0].x, out[0].y); for (let i = 1; i < out.length; i++) c.lineTo(out[i].x, out[i].y); c.closePath(); c.clip();
+    const Tm = G.M.mul(Tp, vpMatrix(vp));
+    const bb = vpOutline(vp).reduce((bb, q) => G.bbAdd(bb, P((q.x - vp.c.x) / vp.vs + vp.vc.x, (q.y - vp.c.y) / vp.vs + vp.vc.y)), G.bbEmpty());
+    const r = new Renderer(c, doc, { ...base, space: 'MODEL', vpFrozen: vp.frozen && vp.frozen.length ? new Set(vp.frozen) : null, dashScale: doc.header.psltscale !== 0 ? 1 / vp.vs : 1 });
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    renderDoc(r, doc, Tm, bb);
+    c.restore(); c.beginPath();
+  }
+  if (psLast) drawPaper();
 }

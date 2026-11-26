@@ -1,6 +1,7 @@
 // Exportação: contexto vetorial (imita Canvas2D) -> SVG / PDF ; PNG via canvas
 import * as G from './geom.js';
-import { Renderer, renderDoc } from './render.js';
+import { Renderer, renderDoc, renderLayout } from './render.js';
+import { pageSize } from './doc.js';
 import { FONT } from './entities.js';
 
 // ---------- contexto vetorial ----------
@@ -205,4 +206,39 @@ export function exportImage(doc, bb, fmt, opts = {}) { // SVG/PNG do tamanho do 
   }
   const vc = new VectorCtx(); renderDoc(new Renderer(vc, doc, ropts), doc, Tm, vbb);
   return Promise.resolve(new Blob([toSVG(vc, W, H, ropts.bg)], { type: 'image/svg+xml' }));
+}
+
+// ---------- plotagem de layout (espaço papel) ----------
+// layout: {name, page}; opts: {format, dpi, windowBB, viewBB}
+export function plotLayout(doc, layout, opts = {}) {
+  const page = layout.page; const [pw, ph] = pageSize(page);
+  const fmt = opts.format || 'pdf';
+  const u = fmt === 'png' ? (opts.dpi || 300) / 25.4 : fmt === 'pdf' ? 72 / 25.4 : 1; // unidades de saída por mm
+  const W = pw * u, H = ph * u;
+  // região do papel a plotar
+  let bb;
+  if (page.area === 'extents') { bb = G.bbEmpty(); for (const e of doc.spaceEnts(layout.name)) { const b = doc.bbox(e); if (G.bbValid(b)) G.bbUnion(bb, b); } if (!G.bbValid(bb)) bb = { minX: 0, minY: 0, maxX: pw, maxY: ph }; }
+  else if ((page.area === 'window' && opts.windowBB) || (page.area === 'display' && opts.viewBB)) bb = opts.windowBB || opts.viewBB;
+  else bb = { minX: 0, minY: 0, maxX: pw, maxY: ph };
+  const m = page.margin ?? 5;
+  let k = page.fit ? Math.min((pw - 2 * m) / Math.max(bb.maxX - bb.minX, 1e-9), (ph - 2 * m) / Math.max(bb.maxY - bb.minY, 1e-9)) : (page.scale || 1);
+  let ox, oy; // posição (mm no papel) do canto inferior esquerdo da região
+  if (page.center || page.fit) { ox = (pw - (bb.maxX - bb.minX) * k) / 2; oy = (ph - (bb.maxY - bb.minY) * k) / 2; }
+  else if (page.area === 'layout' || !page.area) { ox = bb.minX * k + (page.offX || 0); oy = bb.minY * k + (page.offY || 0); }
+  else { ox = m + (page.offX || 0); oy = m + (page.offY || 0); }
+  const s = k * u;
+  let Tp = [s, 0, 0, -s, (ox - bb.minX * k) * u, H - (oy - bb.minY * k) * u];
+  if (page.upside) Tp = G.M.mul([-1, 0, 0, -1, W, H], Tp);
+  const ropts = { dark: false, lwt: page.lwt !== false, dpr: 1, pxPerMm: u * (page.scaleLw ? k : 1), minLw: 0.18 * u, mono: page.ctb === 'mono' ? '#000000' : null, gray: page.ctb === 'gray', bg: '#ffffff', lodPx: 0, plotting: true, hidePaper: !!page.hidePs, screen: false };
+  if (!page.plotStyles) { ropts.mono = null; ropts.gray = false; }
+  if (fmt === 'png') {
+    const cv = document.createElement('canvas'); cv.width = Math.round(W); cv.height = Math.round(H);
+    const c = cv.getContext('2d'); c.fillStyle = '#ffffff'; c.fillRect(0, 0, cv.width, cv.height); c.lineCap = 'round'; c.lineJoin = 'round';
+    renderLayout(c, doc, layout, Tp, ropts);
+    return new Promise((res) => cv.toBlob(res, 'image/png'));
+  }
+  const vc = new VectorCtx();
+  renderLayout(vc, doc, layout, Tp, ropts);
+  if (fmt === 'svg') return Promise.resolve(new Blob([toSVG(vc, W, H, '#ffffff', 'mm', pw, ph)], { type: 'image/svg+xml' }));
+  return Promise.resolve(toPDF(vc, W, H));
 }

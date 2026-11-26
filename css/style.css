@@ -280,3 +280,33 @@ body.noside #side { display: none; }
 ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: #4a525e; border-radius: 5px; } ::-webkit-scrollbar-track { background: transparent; }
 @media (max-width: 1100px) { .tsearch { width: 140px; } .ws { display: none; } #cmd { left: 4%; right: 4%; } }
 @media (max-width: 900px) { #side { display: none; } .mbox.wide { min-width: 0; } .cols { grid-template-columns: 1fr; } .combo { width: 150px; } .sel { width: 110px; } .coords { display: none; } }
+
+/* ---------- layouts ---------- */
+.rtab.ctx { color: #b9e6a8; }
+.rtab.ctx.on { box-shadow: inset 0 2px 0 #6cc04a; }
+.st-tab { cursor: pointer; }
+.st-tab:hover { color: #fff; background: #333a44; }
+.st-tab.plus { font-weight: 700; padding: 3px 8px; }
+.st-left { overflow: hidden; max-width: 55vw; }
+.st-model.clickable { cursor: pointer; }
+.st-model.clickable:hover { background: #3a414b; border-radius: 3px; }
+.st-model { background: none; border: none; color: #e8ecf1; font: inherit; font-weight: 700; letter-spacing: .5px; padding: 3px 8px; border-left: 1px solid #3a414b; }
+.vpctl { display: inline-flex; align-items: center; gap: 2px; }
+.st-scale.vp { width: 120px; }
+.psdlg { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; }
+.pscol { display: flex; flex-direction: column; gap: 8px; }
+.pscols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.psbox { border: 1px solid var(--line); border-radius: 3px; padding: 6px 10px 8px; margin: 0; }
+.psbox legend { color: var(--acc2); padding: 0 4px; font-size: 12px; }
+.psbox .field > label { min-width: 110px; }
+.psbox select { max-width: 100%; }
+.psprevrow { display: flex; gap: 10px; align-items: center; }
+.psprev { background: #1d2128; border: 1px solid var(--line); flex: none; }
+.psm { min-width: 520px; }
+.psm-cur { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+.psm-row { display: flex; gap: 10px; }
+.psm-btns { display: flex; flex-direction: column; gap: 6px; }
+.psm h4 { margin: 10px 0 4px; color: var(--acc2); font-weight: 600; }
+.psdetails .prow { grid-template-columns: 150px 1fr; }
+.previewbox { max-height: 72vh; overflow: auto; background: #555; padding: 12px; text-align: center; }
+.plotimg { max-width: 100%; box-shadow: 0 4px 16px rgba(0,0,0,.5); background: #fff; }

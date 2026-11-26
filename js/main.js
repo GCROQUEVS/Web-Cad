@@ -2,6 +2,7 @@ import { App } from './app.js';
 import { UI } from './ui.js';
 import { registerCommands } from './commands.js';
 import { registerMore } from './commands2.js';
+import { registerLayout } from './commands3.js';
 import { Renderer } from './render.js';
 
 const app = new App(document.body);
@@ -10,6 +11,7 @@ window.webcad = app; window.webcadUI = ui; // depuração
 try { const o = JSON.parse(localStorage.getItem('webcad.opts') || '{}'); Object.assign(app.settings, o); } catch { /* */ }
 registerCommands(app, ui);
 registerMore(app, ui);
+registerLayout(app, ui);
 ui.init();
 app.mount();
 Renderer.onImageLoad = () => { app.sceneDocDirty = true; app.redraw(); };

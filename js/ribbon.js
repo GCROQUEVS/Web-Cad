@@ -61,6 +61,12 @@ const ICONS = {
   new: [['M6 3h8l4 4v14H6z', W], ['M14 3v4h4', W]], open: [['M3 7h6l2 2h10v10H3z', Y]], save: [['M5 3h12l3 3v15H5z', W], ['M8 3v6h8V3', B], ['M8 14h8v7H8z', W]], saveas: [['M5 3h12l3 3v15H5z', W], ['M8 3v6h8V3', B], ['M14 15l5-5 2 2-5 5h-2z', Y]],
   undo: [['M9 7L4 12l5 5', W], ['M4 12h10a5 5 0 0 1 0 10h-3', W]], redo: [['M15 7l5 5-5 5', W], ['M20 12H10a5 5 0 0 0 0 10h3', W]], help: [['M12 4a8 8 0 1 0 .01 0', W], ['M9.5 9.5a2.5 2.5 0 1 1 3 2.4c-.6.2-.5.8-.5 1.6M12 17h0', B]],
   browser: [['M3 5h18v14H3zM3 9h18', W], ['M7 13h6', B]], start: [['M4 11l8-7 8 7v9H4z', W], ['M10 20v-5h4v5', B]], close: [['M6 6l12 12M18 6L6 18', W]], wrench: [['M15 4a5 5 0 0 0-6 6L3 16l3 3 6-6a5 5 0 0 0 6-6l-3 3-3-3z', W]],
+  lnew: [['M5 3h10l4 4v14H5z', W], ['M12 10v8M8 14h8', Gn]], lrename: [['M4 17h16', W], ['M14 4l4 4-8 8H6v-4z', Y]], lcopy: [['M8 8h11v12H8z', W], ['M5 16V4h11', B]], ldel: [['M5 3h10l4 4v14H5z', W], ['M9 12l6 6M15 12l-6 6', Rd]],
+  vprect: [['M3 4h18v16H3z', '#9aa3ae'], ['M6 7h12v10H6z', B, 1.8]], vppoly: [['M3 4h18v16H3z', '#9aa3ae'], ['M6 8l7-2 5 5-3 6H7z', B, 1.8]], vpobj: [['M3 4h18v16H3z', '#9aa3ae'], ['M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0-10 0', B, 1.8]],
+  vpclip: [['M5 5h14v14H5z', B], ['M3 15l18-6', Rd]], vplock: [['M6 11h12v9H6z', Y], ['M8 11V8a4 4 0 0 1 8 0v3', W], ['M3 3h18', B]], vpunlock: [['M6 11h12v9H6z', Y], ['M8 11V8a4 4 0 0 1 8-1', W]],
+  vpfit: [['M3 4h18v16H3z', '#9aa3ae'], ['M5 6h14v12H5z', B, 1.8], ['M8 9l-2-2M16 9l2-2M8 15l-2 2M16 15l2 2', Y]], mspace: [['M3 4h18v16H3z', B, 2], ['M8 15l3-6 3 4 2-2 2 4', W]], pspace: [['M5 3h14v18H5z', W, 1.8, 'rgba(255,255,255,.08)'], ['M8 17h8', B]],
+  vpmax: [['M3 4h18v16H3z', '#9aa3ae'], ['M8 8L4 4M16 8l4-4M8 16l-4 4M16 16l4 4', B]], vpmin: [['M3 4h18v16H3z', '#9aa3ae'], ['M4 4l4 4M20 4l-4 4M4 20l4-4M20 20l-4-4', B]], chspace: [['M3 6h8v12H3z', B], ['M13 6h8v12h-8z', W], ['M8 12h8M14 9l3 3-3 3', Y]],
+  vpscale: [['M3 4h18v16H3z', '#9aa3ae'], ['M7 15l4-6 3 4 3-2', B], ['M15 18h4', Y]], titleblock: [['M3 3h18v18H3z', W], ['M11 14h10M11 14v7M16 14v7M11 17.5h10', B]],
   // status
   snap: [['M5 5h0M12 5h0M19 5h0M5 12h0M12 12h0M19 12h0M5 19h0M12 19h0M19 19h0', W, 3]], ortho: [['M5 4v16h15', W]], polar: [['M4 20h16M4 20L18 6', W], ['M12 20a8 8 0 0 0-2-5', B]], otrack: [['M4 20L20 4', W], ['M4 12h16', B, 1.2]], osnap: [['M6 6h12v12H6z', W], ['M12 12h0', B, 4]], dyn: [['M3 6h18v12H3z', W], ['M7 12h6M15 10v4', B]],
 };
@@ -150,6 +156,15 @@ export function buildChrome(ui) {
       { title: 'Transferência', items: [big('paste', 'Colar', run('PASTECLIP'), pasteV), col(icn('cut', 'Recortar (Ctrl+X)', run('CUTCLIP')), icn('copyclip', 'Copiar (Ctrl+C)', run('COPYCLIP')), icn('copybase', 'Copiar com ponto base', run('COPYBASE')))] },
       { title: 'Vista', items: [big('vports', 'Janelas', () => app.setLayout(app.layout === 'single' ? 'three' : 'single'), vpV), col(icn('zoomext', 'Zoom extensão', run('ZE')), icn('zoomwin', 'Zoom janela', run('ZOOM')), icn('pan', 'Pan', run('PAN')))] },
     ] },
+    { id: 'layout', label: 'Layout', contextual: true, panels: [
+      { title: 'Layout', items: [big('lnew', 'Novo', runW('LAYOUT', 'Novo')), big('pagesetup', 'Configurar\npágina', run('PAGESETUP')), col(sm('lrename', 'Renomear', () => ui.renameLayoutUI()), sm('lcopy', 'Copiar', () => app.runWith('LAYOUT', 'Copiar', app.space, '')), sm('ldel', 'Excluir', () => ui.deleteLayoutUI()))] },
+      { title: 'Viewports de layout', items: [big('vprect', 'Retangular', run('MVIEW'), [V('Retangular', run('MVIEW'), 'vprect'), V('Poligonal', runW('MVIEW', 'Poligonal'), 'vppoly'), V('De objeto', runW('MVIEW', 'Objeto'), 'vpobj')]),
+        col(sm('vports', 'Configuração', runW('MVIEW', '2'), [V('Uma (ajustar à folha)', runW('MVIEW', 'Ajustar'), 'vpfit'), V('Duas: verticais', runW('MVIEW', '2', 'Vertical'), 'vports'), V('Duas: horizontais', runW('MVIEW', '2', 'Horizontal'), 'vports'), V('Três: maior à direita', runW('MVIEW', '3', 'Direita'), 'vports'), V('Três: maior acima', runW('MVIEW', '3', 'Acima'), 'vports'), V('Quatro', runW('MVIEW', '4'), 'vports')]), sm('vpclip', 'Recortar', run('VPCLIP')), sm('vplock', 'Travar', runW('VPLOCK', 'Travar'), [V('Travar', runW('VPLOCK', 'Travar'), 'vplock'), V('Destravar', runW('VPLOCK', 'Destravar'), 'vpunlock')])),
+        col(sm('vpfit', 'Ajustar à folha', runW('MVIEW', 'Ajustar')), sm('vpscale', 'Escala', run('VPSCALE')), sm('pspace', 'Ligar/Desligar', runW('MVIEW', 'Desligar'), [V('Ligar viewports', runW('MVIEW', 'Ligar'), 'vprect'), V('Desligar viewports', runW('MVIEW', 'Desligar'), 'vprect')]))] },
+      { title: 'Espaço', items: [big('mspace', 'Espaço\nmodelo', run('MSPACE')), col(sm('pspace', 'Espaço papel', run('PSPACE')), sm('vpmax', 'Maximizar viewport', run('VPMAX')), sm('chspace', 'Mudar de espaço', run('CHSPACE')))] },
+      { title: 'Camadas na viewport', items: [col(sm('layfrz', 'Congelar na viewport', run('VPFREEZE')), sm('laythw', 'Descongelar na viewport', run('VPTHAW')), sm('layprops', 'Gerenciador de camadas', () => ui.toggleLayerPalette()))] },
+      { title: 'Prancha', items: [big('titleblock', 'Carimbo\nABNT', run('CARIMBO')), big('plot', 'Plotar', run('PLOT'))] },
+    ] },
     { id: 'insert', label: 'Inserir', panels: [
       { title: 'Bloco', items: [big('insert', 'Inserir', run('INSERT'), insertV), big('bcreate', 'Criar\nbloco', run('BLOCK')), big('bedit', 'Editor\nde bloco', run('BEDIT'))] },
       { title: 'Definição de bloco', items: [big('attdef', 'Definir\natributos', run('ATTDEF')), col(sm('attedit', 'Editar atributos', run('EATTEDIT')), sm('wblock', 'Exportar bloco', run('WBLOCK')))] },
@@ -232,7 +247,8 @@ export function buildChrome(ui) {
       wrap.append(panel);
     }
     panelsOf[t.id] = wrap; rib.append(wrap);
-    const tbtn = h('button', { class: 'rtab', 'data-tab': t.id, onclick: () => select(t.id), ondblclick: () => document.body.classList.toggle('ribbon-min') }, t.label);
+    const tbtn = h('button', { class: 'rtab' + (t.contextual ? ' ctx' : ''), 'data-tab': t.id, onclick: () => select(t.id), ondblclick: () => document.body.classList.toggle('ribbon-min') }, t.label);
+    if (t.contextual) tbtn.hidden = true;
     tabsEl.append(tbtn);
   }
   tabsEl.append(h('button', { class: 'rtab-min', title: 'Minimizar/restaurar a faixa de opções', onclick: () => document.body.classList.toggle('ribbon-min') }, '⌃'));
@@ -243,7 +259,14 @@ export function buildChrome(ui) {
     try { localStorage.setItem('webcad.tab', id); } catch { /* */ }
   }
   let last = 'home'; try { last = localStorage.getItem('webcad.tab') || 'home'; } catch { /* */ }
+  if (last === 'layout') last = 'home';
   select(panelsOf[last] ? last : 'home');
+  ui.showLayoutTab = (on) => {
+    const b = tabsEl.querySelector('.rtab[data-tab="layout"]'); const was = !b.hidden; b.hidden = !on;
+    const cur = tabsEl.querySelector('.rtab.on')?.dataset.tab;
+    if (on && !was) select('layout'); else if (!on && cur === 'layout') select('home');
+    setTimeout(() => ui.fitRibbon && ui.fitRibbon(), 0);
+  };
   // recolhe painéis da direita quando a faixa não cabe na largura da janela
   const fit = () => {
     closePopup();
@@ -261,7 +284,7 @@ export function buildChrome(ui) {
   // ---- barra de status
   const st = document.getElementById('status');
   ui.coordEl = h('div', { class: 'coords', title: 'Coordenadas do cursor' }, '0, 0, 0');
-  const left = h('div', { class: 'st-left' }, h('button', { class: 'st-tab on' }, 'Modelo'));
+  const left = h('div', { class: 'st-left' }); ui.layoutTabsEl = left;
   const tg = h('div', { class: 'toggles' });
   ui.toggleBtns = {};
   const T2 = [['grid', 'grid', 'Grade (F7)'], ['snap', 'snap', 'Snap à grade (F9)'], ['ortho', 'ortho', 'Modo orto (F8)'], ['polar', 'polar', 'Rastreamento polar (F10)'], ['otrack', 'otrack', 'Rastreamento de snap ao objeto (F11)'], ['osnap', 'osnap', 'Snap ao objeto (F3)'], ['lwt', 'lwt', 'Exibir espessura de linha'], ['dyn', 'dyn', 'Entrada dinâmica (F12)']];
@@ -275,7 +298,13 @@ export function buildChrome(ui) {
   ui.scaleSel = scaleSel;
   const gear = h('button', { class: 'st-ic', title: 'Configurações de desenho', html: icon('settings', 18), onclick: () => ui.settingsDialog() });
   ui.infoEl = h('div', { class: 'info' }); ui.perfEl = h('div', { class: 'info perf', title: 'Tempo da última renderização' });
-  st.append(left, h('div', { class: 'spacer' }), ui.infoEl, ui.perfEl, ui.coordEl, h('span', { class: 'st-model' }, 'MODELO'), tg, scaleSel, gear);
+  ui.spaceBtn = h('button', { class: 'st-model', title: 'Alternar entre espaço modelo e papel (clique duplo dentro/fora da viewport também alterna)', onclick: () => { if (app.space === 'MODEL') return; if (app.msvp) app.pspace(); else app.runImmediate('MSPACE'); } }, 'MODELO');
+  ui.vpScaleSel = h('select', { class: 'st-scale vp', title: 'Escala da viewport', onchange: () => { const v = ui.vpScaleSel.value; const vp = ui.currentVp(); if (!vp) return; if (v === 'custom') { app.runImmediate('VPSCALE'); return; } const [a, b] = v.split(':').map(Number); app.setVpScale(vp, scaleToVsUI(a, b)); } });
+  const scaleToVsUI = (a, b) => (a / b) * ({ 0: 1, 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 7: 1e6 }[app.doc.header.insunits] ?? 1);
+  ui.vpLockBtn = h('button', { class: 'st-ic', title: 'Travar/destravar a viewport', html: icon('vplock', 18), onclick: () => { const vp = ui.currentVp(); if (!vp) return; app.doc.begin('VPLOCK'); app.doc.modify(vp, (x) => { x.locked = !x.locked; }); app.doc.commit(); ui.refreshStatus(); } });
+  ui.vpMaxBtn = h('button', { class: 'st-ic', title: 'Maximizar/restaurar viewport', html: icon('vpmax', 18), onclick: () => { const L = app.curLayout(); if (L && L.prevView) app.runImmediate('VPMIN'); else app.runImmediate('VPMAX'); } });
+  ui.vpCtl = h('span', { class: 'vpctl' }, ui.vpMaxBtn, ui.vpScaleSel, ui.vpLockBtn);
+  st.append(left, h('div', { class: 'spacer' }), ui.infoEl, ui.perfEl, ui.coordEl, ui.spaceBtn, ui.vpCtl, tg, scaleSel, gear);
 }
 
 // ---------- abas de arquivos ----------
@@ -330,7 +359,8 @@ export class LayerPalette {
       h('input', { class: 'pal-search', placeholder: 'Procurar camada', value: this.filter, oninput: (ev) => { this.filter = ev.target.value; this.render(); const s = this.body.querySelector('.pal-search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }));
     b.append(h('div', { class: 'pal-cur' }, 'Camada atual: ' + doc.curLayer), tools);
     const tbl = h('table', {});
-    tbl.append(h('tr', {}, ...['St.', 'Nome', 'Lig.', 'Cong.', 'Bloq.', 'Plot.', 'Cor', 'Tipo de linha', 'Espessura', 'Obj.'].map((t) => h('th', {}, t))));
+    const vp = ui.currentVp ? ui.currentVp() : null;
+    tbl.append(h('tr', {}, ...['St.', 'Nome', 'Lig.', 'Cong.', ...(vp ? ['Cong. VP'] : []), 'Bloq.', 'Plot.', 'Cor', 'Tipo de linha', 'Espessura', 'Obj.'].map((t) => h('th', { title: t === 'Cong. VP' ? 'Congelar só na viewport atual' : '' }, t))));
     const all = [...doc.layers.values()];
     const list = all.filter((L) => !this.filter || L.name.toLowerCase().includes(this.filter.toLowerCase()));
     for (const L of list) {
@@ -346,7 +376,9 @@ export class LayerPalette {
       const lwS = h('select', { onchange: (ev) => this.set(L, { lw: +ev.target.value }) }, ...LINEWEIGHTS.map((w) => h('option', { value: w }, lwLabel(w)))); lwS.value = String(L.lw);
       const tr = h('tr', { class: (L.name === doc.curLayer ? 'cur ' : '') + (L.name === this.selName ? 'selr' : ''), onclick: () => { this.selName = L.name; this.render(); }, ondblclick: (ev) => { if (!ev.target.closest('.pn, select, button')) { doc.curLayer = L.name; this.render(); ui.refreshLayerCombo(); } } },
         h('td', { class: 'pc' }, L.name === doc.curLayer ? '✔' : ''), nameTd,
-        tog('on', '💡', '⚫', 'Ligar/desligar'), tog('frozen', '❄', '☀', 'Congelar/descongelar'), tog('locked', '🔒', '🔓', 'Bloquear/desbloquear'), tog('plot', '🖨', '🚫', 'Plotar'),
+        tog('on', '💡', '⚫', 'Ligar/desligar'), tog('frozen', '❄', '☀', 'Congelar/descongelar'),
+        ...(vp ? [h('td', { class: 'pc' }, h('button', { class: 'ib', title: 'Congelar só nesta viewport', onclick: (ev) => { ev.stopPropagation(); const fz = new Set(vp.frozen || []); if (fz.has(L.name)) fz.delete(L.name); else fz.add(L.name); doc.begin('VPLAYER'); doc.modify(vp, (x) => { x.frozen = [...fz]; }); doc.commit(); app.redraw(); this.render(); } }, (vp.frozen || []).includes(L.name) ? '❄' : '☀'))] : []),
+        tog('locked', '🔒', '🔓', 'Bloquear/desbloquear'), tog('plot', '🖨', '🚫', 'Plotar'),
         h('td', { class: 'pc' }, h('button', { class: 'swbtn', style: `background:${L.tc != null ? trueCss(L.tc) : aciHex(L.color)}`, title: 'Cor', onclick: async (ev) => { ev.stopPropagation(); const c = await ui.colorPicker(L.color, true); if (c) this.set(L, { color: c.color, tc: c.tc }); } })),
         h('td', {}, ltS), h('td', {}, lwS), h('td', { class: 'cnt' }, String(counts[L.name] || 0)));
       tbl.append(tr);

@@ -5,8 +5,9 @@ import { ACI, aciCss, aciHex, trueCss, nearestAci, colorLabel, LINEWEIGHTS, lwLa
 import { parseDxf, writeDxf, decodeDxfBytes, dxfBlob } from './dxf.js';
 import { dwgToDxf, isDwg, dwgVersion } from './dwg.js';
 import { store, download, saveWithPicker } from './storage.js';
-import { plot, exportImage, PAPERS } from './export.js';
-import { Doc } from './doc.js';
+import { plot, exportImage, PAPERS, plotLayout } from './export.js';
+import { Doc, PAPER_SIZES, pageSize, defaultPage } from './doc.js';
+import { VP_SCALES, vsLabel, scaleToVs } from './entities.js';
 import { cloneEnt } from './entities.js';
 import { OSNAP_KINDS } from './app.js';
 import { buildChrome, renderDocTabs, LayerPalette, icon, popupMenu } from './ribbon.js';
@@ -85,14 +86,15 @@ export class UI {
     this.docs = [{ doc: app.doc, state: null, handle: null }]; this.curDoc = 0; this.startOpen = false;
     buildChrome(this); this.buildCmd(); this.buildProps();
     this.layerPalette = new LayerPalette(this);
-    this.buildStart(); renderDocTabs(this);
+    this.buildStart(); renderDocTabs(this); this.refreshLayoutTabs();
+    app.onSpace = () => { this.refreshLayoutTabs(); this.showLayoutTab(app.space !== 'MODEL'); this.refreshStatus(); this.layerPalette.render(); this.refreshProps(); this.updateTitle(); };
     app.onMsg = (t, c) => this.addHist(t, c);
     app.onEcho = (t) => { const last = this.histEl.lastElementChild; if (last && last.classList.contains('prompt')) last.append(h('span', { class: 'echo' }, ' ' + t)); };
     app.echoCmd = (n) => { this.addHist('Comando: ' + n, 'cmd'); if (this.cmdHist[this.cmdHist.length - 1] !== n) this.cmdHist.push(n); this.histIdx = -1; };
     app.onPrompt = (p, kws) => this.setPrompt(p, kws);
     app.onCursor = (p) => { this.coordEl.textContent = `${G.fmt(p.x, 4)}, ${G.fmt(p.y, 4)}, 0`; };
     app.onSettings = () => this.refreshStatus();
-    app.onSelChange = () => this.refreshProps();
+    app.onSelChange = () => { this.refreshProps(); this.refreshStatus(); if (this.app.curLayout()) this.layerPalette.render(); };
     app.onDocChange = () => {
       this.refreshProps(); this.refreshLayerCombo(); this.updateTitle(); this.infoEl.textContent = `${app.doc.ents.size} objetos`; this.refreshStatus();
       if (!this._lpT) this._lpT = setTimeout(() => { this._lpT = null; this.layerPalette.render(); }, 120);
@@ -167,6 +169,23 @@ export class UI {
     for (const [k, b] of Object.entries(this.toggleBtns)) if (k[0] !== '_') b.classList.toggle('on', !!this.app.settings[k]);
     this.toggleBtns._pick.classList.toggle('on', this.app.settings.pickstyle !== false);
     this.toggleBtns._iso.classList.toggle('alert', !!(this.app.doc.hidden && this.app.doc.hidden.size));
+    if (this.spaceBtn) {
+      const app = this.app, lay = app.space && app.space !== 'MODEL';
+      this.spaceBtn.textContent = !lay || app.msvp ? 'MODELO' : 'PAPEL';
+      this.spaceBtn.classList.toggle('clickable', !!lay);
+      const vp = this.currentVp(); this.vpCtl.hidden = !lay; this.vpScaleSel.disabled = !vp; this.vpLockBtn.disabled = !vp;
+      if (lay) {
+        const u = app.doc.header.insunits; const cur = vp ? vsLabel(vp.vs, u) : '';
+        const opts = VP_SCALES.map(([a, b]) => `${a}:${b}`); this.vpScaleSel.innerHTML = '';
+        if (!vp) this.vpScaleSel.append(h('option', { value: '' }, 'Escala da viewport'));
+        else if (!opts.includes(cur)) this.vpScaleSel.append(h('option', { value: cur }, cur));
+        for (const o of opts) this.vpScaleSel.append(h('option', { value: o }, o));
+        this.vpScaleSel.append(h('option', { value: 'custom' }, 'Personalizada...'));
+        this.vpScaleSel.value = vp ? cur : '';
+        this.vpLockBtn.innerHTML = icon(vp && vp.locked ? 'vplock' : 'vpunlock', 18); this.vpLockBtn.classList.toggle('on', !!(vp && vp.locked));
+        const L = app.curLayout(); this.vpMaxBtn.innerHTML = icon(L && L.prevView ? 'vpmin' : 'vpmax', 18);
+      }
+    }
     if (this.scaleSel) { const v = String(this.app.doc.dimstyle.dimscale || 1); if (![...this.scaleSel.options].some((o) => o.value === v)) this.scaleSel.append(h('option', { value: v }, '1:' + v)); this.scaleSel.value = v; }
   }
   // ---------- linha de comando ----------
@@ -296,6 +315,12 @@ export class UI {
         else if (kind === 'ang') row(geo, label, this.numInput(same(k) != null ? G.deg(same(k)) : '', (v) => set({ [k]: G.rad(v) })));
         else if (kind === 'text') { const inp = h('textarea', { rows: 2 }); inp.value = same(k) ?? ''; inp.addEventListener('change', () => set({ [k]: inp.value.replace(/\n/g, t === 'MTEXT' ? '\\P' : ' ') })); row(geo, label, inp); }
         else if (kind === 'bool') { const cb = h('input', { type: 'checkbox' }); cb.checked = !!same(k); cb.addEventListener('change', () => set({ [k]: cb.checked })); row(geo, label, cb); }
+        else if (kind === 'vpscale') {
+          const u = doc.header.insunits; const cur = same(k) != null ? vsLabel(same(k), u) : '';
+          const opts = VP_SCALES.map(([a, b]) => `${a}:${b}`);
+          const ss = h('select', { onchange: async (ev) => { let v = ev.target.value; if (v === 'custom') { const t = await this.promptText('Escala personalizada', 'Escala (ex: 1:75 ou 1:33.3):', cur); if (!t) { this.renderProps(); return; } const vs = app.parseScale(t); if (vs) set({ vs }); return; } const [a, b] = v.split(':').map(Number); set({ vs: scaleToVs(a, b, u) }); } }, ...(!opts.includes(cur) ? [h('option', { value: cur }, cur || '*VARIA*')] : []), ...opts.map((o) => h('option', { value: o }, o)), h('option', { value: 'custom' }, 'Personalizada...'));
+          ss.value = cur; row(geo, label, ss);
+        }
         else if (kind === 'pattern') { const ps = h('select', { onchange: (ev) => { const p = ev.target.value; doc.begin('hatch'); for (const e of sel) doc.modify(e, (x) => { x.pattern = p; x.solid = p === 'SOLID'; x.pat = p === 'SOLID' ? [] : makePattern(p, x.scale || 1, x.angle || 0); }); doc.commit(); } }, ...['SOLID', ...Object.keys(HATCH_PATTERNS)].map((p) => h('option', { value: p }, p))); ps.value = same(k) || ''; row(geo, label, ps); }
       }
       if (t === 'HATCH') { // escala/ângulo regeneram padrão
@@ -636,6 +661,7 @@ export class UI {
     download(dxfBlob(writeDxf(d)), nm.value.endsWith('.dxf') ? nm.value : nm.value + '.dxf');
   }
   async plotDialog() {
+    if (this.app.curLayout()) return this.plotLayoutDialog();
     const app = this.app;
     const paper = h('select', {}, ...Object.keys(PAPERS).map((p) => h('option', { value: p }, `${p} (${PAPERS[p][0]}×${PAPERS[p][1]} mm)`))); paper.value = 'A4';
     const orient = h('select', {}, h('option', { value: 'land' }, 'Paisagem'), h('option', { value: 'port' }, 'Retrato'));
@@ -674,6 +700,186 @@ export class UI {
       download(blob, name);
       this.addHist(`Plotado: ${name}`);
     } finally { this.busy(null); }
+  }
+  // ---------- layouts (abas Modelo / Layout) ----------
+  currentVp() { const app = this.app; if (!app.curLayout()) return null; if (app.msvp) return app.msvp; const v = [...app.sel].filter((e) => e.type === 'VIEWPORT'); return v.length === 1 ? v[0] : null; }
+  refreshLayoutTabs() {
+    const el = this.layoutTabsEl; if (!el) return; el.innerHTML = '';
+    const app = this.app, doc = app.doc;
+    const tab = (label, name) => {
+      const b = h('button', { class: 'st-tab' + ((app.space || 'MODEL') === name ? ' on' : ''), title: name === 'MODEL' ? 'Espaço modelo' : `Layout "${label}" — clique direito para opções`, onclick: () => app.setSpace(name) }, label);
+      if (name !== 'MODEL') {
+        b.addEventListener('dblclick', () => this.renameLayoutUI(name));
+        b.addEventListener('contextmenu', (ev) => { ev.preventDefault(); this.layoutTabMenu(b, name); });
+      } else b.addEventListener('contextmenu', (ev) => { ev.preventDefault(); this.layoutTabMenu(b, null); });
+      return b;
+    };
+    el.append(tab('Modelo', 'MODEL'));
+    for (const L of doc.layouts) el.append(tab(L.name, L.name));
+    el.append(h('button', { class: 'st-tab plus', title: 'Novo layout', onclick: () => this.newLayoutQuick() }, '+'));
+  }
+  newLayoutQuick() {
+    const doc = this.app.doc; const name = doc.uniqueLayoutName(); const base = this.app.curLayout();
+    doc.begin('LAYOUT'); doc.tablesChanged(); const L = { name, page: { ...(base ? base.page : defaultPage()) }, view: null, inited: false }; doc.layouts.push(L); doc.commit();
+    this.refreshLayoutTabs(); this.app.setSpace(name);
+  }
+  layoutTabMenu(anchor, name) {
+    const app = this.app, doc = app.doc; const L = name ? doc.layout(name) : null; const idx = L ? doc.layouts.indexOf(L) : -1;
+    const mv = (d) => { doc.begin('LAYOUT'); doc.tablesChanged(); const a = doc.layouts; const j = idx + d; [a[idx], a[j]] = [a[j], a[idx]]; doc.commit(); this.refreshLayoutTabs(); };
+    const items = [{ label: 'Novo layout', icon: 'lnew', act: () => this.newLayoutQuick() }];
+    if (L) items.push({ label: 'Excluir', icon: 'ldel', act: () => this.deleteLayoutUI(name) }, { label: 'Renomear', icon: 'lrename', act: () => this.renameLayoutUI(name) }, { label: 'Copiar layout', icon: 'lcopy', act: () => app.runWith('LAYOUT', 'Copiar', name, '') },
+      ...(idx > 0 ? [{ label: 'Mover para a esquerda', icon: 'undo', act: () => mv(-1) }] : []), ...(idx < doc.layouts.length - 1 ? [{ label: 'Mover para a direita', icon: 'redo', act: () => mv(1) }] : []),
+      '-', { label: 'Gerenciador de configuração de página...', icon: 'pagesetup', act: () => { app.setSpace(name); this.pageSetupManager(); } }, { label: 'Plotar...', icon: 'plot', act: () => { app.setSpace(name); app.runImmediate('PLOT'); } });
+    items.push('-', { label: 'Ocultar/mostrar abas de arquivos', icon: 'filetabs', act: () => document.body.classList.toggle('nofiletabs') });
+    popupMenu(anchor, items);
+    const m = document.querySelector('.popup.rmenu'); if (m) { const r = anchor.getBoundingClientRect(); m.style.top = Math.max(4, r.top - m.offsetHeight - 2) + 'px'; }
+  }
+  async promptText(title, label, value = '') {
+    const inp = h('input', { type: 'text', value }); const ok = await this.modal(title, this.field(label, inp)); return ok ? inp.value.trim() : null;
+  }
+  async renameLayoutUI(name) {
+    name = name || this.app.space; if (!name || name === 'MODEL') return;
+    const nn = await this.promptText('Renomear layout', 'Novo nome:', name); if (nn && nn !== name) this.app.renameLayout(name, nn);
+  }
+  async deleteLayoutUI(name) {
+    name = name || this.app.space; const doc = this.app.doc; if (!name || name === 'MODEL') return;
+    if (doc.layouts.length <= 1) { this.addHist('O desenho precisa ter pelo menos um layout.', 'err'); return; }
+    const n = doc.spaceEnts(name).length;
+    if (!(await this.modal('Excluir layout', h('p', {}, `Excluir o layout "${name}"${n ? ` e os ${n} objeto(s) que estão nele` : ''}?`), [['Excluir', true], ['Cancelar', false]]))) return;
+    const app = this.app; if (app.space === name) app.setSpace('MODEL');
+    doc.begin('LAYOUT'); for (const e of doc.spaceEnts(name)) doc.remove(e); doc.tablesChanged(); doc.layouts.splice(doc.layouts.findIndex((l) => l.name === name), 1); doc.commit();
+    this.refreshLayoutTabs();
+  }
+  // ---------- configuração de página ----------
+  async pageSetupManager() {
+    const app = this.app, doc = app.doc;
+    if (!doc.layouts.length) return;
+    let curName = app.curLayout() ? app.curLayout().name : doc.layouts[0].name;
+    const list = h('select', { size: 8, class: 'blist' });
+    const details = h('div', { class: 'psdetails' });
+    const fill = () => {
+      list.innerHTML = '';
+      list.append(h('option', { value: '@' + curName }, `*${curName}*`));
+      for (const p of doc.pageSetups.values()) list.append(h('option', { value: p.name }, p.name));
+      list.value = list.value || '@' + curName; if (!list.value) list.selectedIndex = 0; show();
+    };
+    const pageOf = (v) => (v && v.startsWith('@') ? doc.layout(v.slice(1)).page : doc.pageSetups.get(v));
+    const show = () => {
+      const p = pageOf(list.value || '@' + curName); if (!p) return; const [w, hh] = pageSize(p);
+      details.innerHTML = '';
+      for (const [k, v] of [['Dispositivo', p.device === 'PDF' ? 'PDF (vetorial)' : p.device === 'SVG' ? 'SVG (vetorial)' : 'PNG (imagem)'], ['Tamanho do papel', `${p.custom ? 'Personalizado' : p.paper} — ${G.fmt(w, 2)} × ${G.fmt(hh, 2)} mm (${p.landscape ? 'Paisagem' : 'Retrato'})`], ['Área de plotagem', { layout: 'Layout', extents: 'Extensão', display: 'Exibição', window: 'Janela' }[p.area] || 'Layout'], ['Escala', p.fit ? 'Ajustar ao papel' : `1:${G.fmt(1 / (p.scale || 1), 4)}`], ['Tabela de estilos', { none: 'Nenhuma', mono: 'monochrome.ctb', gray: 'grayscale.ctb' }[p.ctb] || 'Nenhuma']]) details.append(h('div', { class: 'prow' }, h('label', {}, k), h('span', {}, v)));
+    };
+    list.addEventListener('change', show);
+    const btn = (label, fn) => h('button', { class: 'btn', onclick: fn }, label);
+    const body = h('div', { class: 'psm' },
+      h('div', { class: 'psm-cur' }, h('span', { html: icon('pagesetup', 32) }), h('div', {}, h('div', { class: 'note' }, 'Layout atual:'), h('b', {}, curName))),
+      h('h4', {}, 'Configurações de página'),
+      h('div', { class: 'psm-row' }, list, h('div', { class: 'psm-btns' },
+        btn('Definir atual', () => { const v = list.value; if (!v || v.startsWith('@')) return; doc.begin('PAGESETUP'); doc.tablesChanged(); doc.layout(curName).page = { ...doc.pageSetups.get(v) }; doc.commit(); fill(); app.redraw(); }),
+        btn('Nova...', async () => { const n = await this.promptText('Nova configuração de página', 'Nome:', 'Configuração' + (doc.pageSetups.size + 1)); if (!n) return; const base = pageOf(list.value) || doc.layout(curName).page; const p = await this.pageSetupDialog({ ...base, name: n }, { title: `Configuração de página — ${n}` }); if (!p) return; doc.begin('PAGESETUP'); doc.tablesChanged(); doc.pageSetups.set(n, { ...p.page, name: n }); doc.commit(); fill(); list.value = n; show(); }),
+        btn('Modificar...', async () => { const v = list.value || '@' + curName; const p = await this.pageSetupDialog(pageOf(v), { title: `Configuração de página — ${v.startsWith('@') ? curName : v}` }); if (!p) return; doc.begin('PAGESETUP'); doc.tablesChanged(); if (v.startsWith('@')) doc.layout(curName).page = p.page; else doc.pageSetups.set(v, { ...p.page, name: v }); doc.commit(); show(); app.redraw(); }),
+        btn('Importar de layout...', async () => { const others = doc.layouts.filter((l) => l.name !== curName); if (!others.length) return; const sel = h('select', {}, ...others.map((l) => h('option', { value: l.name }, l.name))); if (!(await this.modal('Importar configuração de página', this.field('Copiar do layout', sel)))) return; doc.begin('PAGESETUP'); doc.tablesChanged(); doc.layout(curName).page = { ...doc.layout(sel.value).page }; doc.commit(); show(); app.redraw(); }))),
+      h('h4', {}, 'Detalhes da configuração selecionada'), details);
+    fill();
+    await this.modal('Gerenciador de configuração de página', body, [['Fechar', true]]);
+    this.app.sceneDocDirty = true; this.app.redraw();
+  }
+  // diálogo de configuração de página / plotagem (como no CAD de mesa)
+  async pageSetupDialog(page, opts = {}) {
+    const p = { ...defaultPage(), ...page };
+    const sel = (opts2, v) => { const s = h('select', {}, ...opts2.map(([a, b]) => h('option', { value: a }, b))); s.value = v; return s; };
+    const num = (v) => h('input', { type: 'text', class: 'num', value: G.fmt(v, 3) });
+    const device = sel([['PDF', 'PDF (vetorial) — WebCAD PDF'], ['SVG', 'SVG (vetorial)'], ['PNG', 'PNG (imagem, 300 dpi)']], p.device);
+    const paper = sel([...Object.keys(PAPER_SIZES).map((k) => [k, `${k} (${PAPER_SIZES[k][0]} × ${PAPER_SIZES[k][1]} mm)`]), ['@custom', 'Personalizado...']], p.custom ? '@custom' : p.paper);
+    const cw = num(p.custom ? p.custom[0] : 297), chh = num(p.custom ? p.custom[1] : 210);
+    const customRow = h('div', { class: 'field' }, h('label', {}, 'Largura × altura (mm)'), cw, chh); customRow.hidden = !p.custom;
+    const area = sel([['layout', 'Layout'], ['extents', 'Extensão'], ['display', 'Exibição'], ['window', 'Janela']], p.area);
+    const offX = num(p.offX), offY = num(p.offY); const center = h('input', { type: 'checkbox', checked: p.center });
+    const fit = h('input', { type: 'checkbox', checked: p.fit });
+    const scaleSel = sel([...['1:1', '1:2', '1:4', '1:5', '1:8', '1:10', '1:16', '1:20', '1:30', '1:40', '1:50', '1:100', '2:1', '4:1', '8:1', '10:1', '100:1'].map((x) => [x, x]), ['@custom', 'Personalizada']], '@custom');
+    const sMm = num(p.scale ?? 1), sUnit = num(1);
+    const known = { '1:1': 1, '1:2': 0.5, '1:4': 0.25, '1:5': 0.2, '1:8': 0.125, '1:10': 0.1, '1:16': 0.0625, '1:20': 0.05, '1:30': 1 / 30, '1:40': 0.025, '1:50': 0.02, '1:100': 0.01, '2:1': 2, '4:1': 4, '8:1': 8, '10:1': 10, '100:1': 100 };
+    for (const [k, v] of Object.entries(known)) if (Math.abs(v - (p.scale ?? 1)) < 1e-9) { scaleSel.value = k; break; }
+    scaleSel.onchange = () => { if (known[scaleSel.value]) { sMm.value = G.fmt(known[scaleSel.value], 6); sUnit.value = '1'; } };
+    const scaleLw = h('input', { type: 'checkbox', checked: p.scaleLw });
+    const ctb = sel([['none', 'Nenhuma'], ['mono', 'monochrome.ctb'], ['gray', 'grayscale.ctb']], p.ctb);
+    const lwt = h('input', { type: 'checkbox', checked: p.lwt }), styles = h('input', { type: 'checkbox', checked: p.plotStyles }), psLast = h('input', { type: 'checkbox', checked: p.psLast }), hidePs = h('input', { type: 'checkbox', checked: p.hidePs });
+    const port = h('input', { type: 'radio', name: 'orient', checked: !p.landscape }), land = h('input', { type: 'radio', name: 'orient', checked: p.landscape }), upside = h('input', { type: 'checkbox', checked: p.upside });
+    const margin = num(p.margin ?? 5);
+    const prev = h('canvas', { width: 150, height: 110, class: 'psprev' });
+    const read = () => {
+      const q = { ...p, device: device.value, paper: paper.value === '@custom' ? p.paper : paper.value, custom: paper.value === '@custom' ? [this.app.parseNumber(cw.value) || 297, this.app.parseNumber(chh.value) || 210] : null,
+        area: area.value, offX: this.app.parseNumber(offX.value) || 0, offY: this.app.parseNumber(offY.value) || 0, center: center.checked, fit: fit.checked,
+        scale: (this.app.parseNumber(sMm.value) || 1) / (this.app.parseNumber(sUnit.value) || 1), scaleLw: scaleLw.checked, ctb: ctb.value, lwt: lwt.checked, plotStyles: styles.checked, psLast: psLast.checked, hidePs: hidePs.checked,
+        landscape: land.checked, upside: upside.checked, margin: Math.max(0, this.app.parseNumber(margin.value) ?? 5) };
+      return q;
+    };
+    const drawPrev = () => {
+      const q = read(); const [w, hh] = pageSize(q); const k = Math.min(110 / w, 80 / hh); const c = prev.getContext('2d');
+      c.clearRect(0, 0, 150, 110); c.fillStyle = '#fff'; c.fillRect(75 - w * k / 2, 55 - hh * k / 2, w * k, hh * k);
+      c.strokeStyle = '#3d8ee6'; c.setLineDash([3, 2]); const m = q.margin * k; c.strokeRect(75 - w * k / 2 + m, 55 - hh * k / 2 + m, w * k - 2 * m, hh * k - 2 * m); c.setLineDash([]);
+      c.fillStyle = '#ccc'; c.font = '10px Segoe UI'; c.fillText(`${G.fmt(w, 0)} × ${G.fmt(hh, 0)} mm`, 75 - 30, 108);
+    };
+    paper.onchange = () => { customRow.hidden = paper.value !== '@custom'; drawPrev(); };
+    [port, land, margin, cw, chh].forEach((x) => x.addEventListener('change', drawPrev));
+    const box = (title, ...kids) => h('fieldset', { class: 'psbox' }, h('legend', {}, title), ...kids);
+    const body = h('div', { class: 'psdlg' },
+      h('div', { class: 'pscol' },
+        box('Impressora/plotter', this.field('Nome', device), h('div', { class: 'psprevrow' }, prev, h('div', { class: 'note' }, 'Plotar para arquivo. O PDF sai em escala real (vetorial), pronto para gráfica ou impressora.'))),
+        box('Tamanho do papel', paper, customRow, this.field('Margem imprimível (mm)', margin)),
+        h('div', { class: 'pscols2' },
+          box('Área de plotagem', this.field('O que plotar', area)),
+          box('Deslocamento da plotagem', this.field('X (mm)', offX), this.field('Y (mm)', offY), h('label', { class: 'chk' }, center, ' Centralizar a plotagem'))),
+        box('Escala de plotagem', h('label', { class: 'chk' }, fit, ' Ajustar ao papel'), this.field('Escala', scaleSel), h('div', { class: 'field' }, sMm, h('span', {}, 'mm ='), sUnit, h('span', {}, 'unidade(s)')), h('label', { class: 'chk' }, scaleLw, ' Escalar espessuras de linha'))),
+      h('div', { class: 'pscol' },
+        box('Tabela de estilos de plotagem (penas)', ctb),
+        box('Opções de plotagem', h('label', { class: 'chk' }, lwt, ' Plotar espessuras de linha'), h('label', { class: 'chk' }, styles, ' Plotar com estilos de plotagem'), h('label', { class: 'chk' }, psLast, ' Plotar o espaço papel por último'), h('label', { class: 'chk' }, hidePs, ' Ocultar objetos do espaço papel')),
+        box('Orientação do desenho', h('label', { class: 'chk' }, port, ' Retrato'), h('label', { class: 'chk' }, land, ' Paisagem'), h('label', { class: 'chk' }, upside, ' Plotar de cabeça para baixo'))));
+    setTimeout(drawPrev, 30);
+    const buttons = opts.plot ? [['Pré-visualizar', 'preview', false], ['Aplicar ao layout', 'apply', false], ['Plotar', true], ['Cancelar', false]] : [['OK', true], ['Cancelar', false]];
+    for (;;) {
+      const r = await this.modal(opts.title || 'Configuração de página', body, buttons, 'wide');
+      if (!r) return null;
+      const q = read();
+      if (r === 'preview') { await this.plotPreview(q); continue; }
+      if (r === 'apply') { const L = this.app.curLayout(); if (L) { this.app.doc.begin('PAGESETUP'); this.app.doc.tablesChanged(); L.page = q; this.app.doc.commit(); this.app.sceneDocDirty = true; this.app.redraw(); this.addHist('Configuração aplicada ao layout.', 'dim'); } continue; }
+      return { page: q, action: r };
+    }
+  }
+  async plotPreview(page) {
+    const L = this.app.curLayout(); if (!L) return;
+    const blob = await plotLayout(this.app.doc, { ...L, page }, { format: 'png', dpi: 60, viewBB: this.app.viewBB() });
+    const img = h('img', { class: 'plotimg', src: URL.createObjectURL(blob) });
+    await this.modal('Pré-visualização da plotagem', h('div', { class: 'previewbox' }, img), [['Fechar', true]], 'wide');
+    URL.revokeObjectURL(img.src);
+  }
+  async plotLayoutDialog() {
+    const app = this.app, L = app.curLayout(); if (!L) return;
+    const r = await this.pageSetupDialog(L.page, { plot: true, title: `Plotar — ${L.name}` }); if (!r) return;
+    let bb = null;
+    if (r.page.area === 'window') {
+      if (app.msvp) app.pspace();
+      const a = await app.getPoint('Primeiro canto da janela de plotagem:'); if (!a) return;
+      const b = await app.getPoint('Canto oposto:', { rubber: false }); if (!b) return;
+      bb = { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+    } else if (r.page.area === 'display') bb = app.msvp ? null : app.viewBB();
+    this.busy('Plotando...'); await new Promise((res) => setTimeout(res, 20));
+    try {
+      const fmt = r.page.device === 'SVG' ? 'svg' : r.page.device === 'PNG' ? 'png' : 'pdf';
+      const blob = await plotLayout(app.doc, { ...L, page: r.page }, { format: fmt, dpi: 300, windowBB: bb, viewBB: bb });
+      const name = app.doc.name.replace(/\.(dxf|dwg)$/i, '') + '-' + L.name.replace(/[^\w\- ]+/g, '_') + '.' + fmt;
+      await download(blob, name);
+      this.addHist(`Layout "${L.name}" plotado: ${name}`);
+    } finally { this.busy(null); }
+  }
+  async titleBlockDialog(L) {
+    const f = { empresa: '', titulo: L.name, cliente: '', resp: '', escala: 'INDICADA', data: new Date().toLocaleDateString('pt-BR'), desenho: '', rev: '00', folha: `${this.app.doc.layouts.indexOf(L) + 1}/${this.app.doc.layouts.length}` };
+    const labels = { empresa: 'Projeto / empresa', titulo: 'Título da prancha', cliente: 'Cliente / obra', resp: 'Responsável técnico', escala: 'Escala', data: 'Data', desenho: 'Desenho (autor)', rev: 'Revisão', folha: 'Folha' };
+    const inputs = {}; const body = h('div', {}, h('p', { class: 'note' }, `Cria a margem da folha (25 mm à esquerda para encadernação, ${pageSize(L.page)[0] >= 594 ? 10 : 7} mm nas demais) e o carimbo de 175 mm no canto inferior direito, conforme a ABNT NBR 10068.`));
+    for (const [k, l] of Object.entries(labels)) { inputs[k] = h('input', { type: 'text', value: f[k] }); body.append(this.field(l, inputs[k])); }
+    if (!(await this.modal('Carimbo da prancha (ABNT)', body))) return null;
+    for (const k of Object.keys(labels)) f[k] = inputs[k].value;
+    return f;
   }
   // ---------- diálogos dos comandos novos ----------
   pickFile(accept) {

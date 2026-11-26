@@ -644,6 +644,39 @@ T.IMAGE = {
 };
 T.WIPEOUT = { ...T.IMAGE, fill: true };
 
+// ---------- Viewport de layout (janela do espaço papel para o modelo) ----------
+// c: centro no papel; w,h: tamanho no papel; clip: contorno poligonal opcional (papel);
+// vc: centro da vista no modelo; vs: escala (unidades de papel por unidade de modelo); on, locked, frozen[]
+export const vpMatrix = (e) => [e.vs, 0, 0, e.vs, e.c.x - e.vc.x * e.vs, e.c.y - e.vc.y * e.vs];
+export function vpOutline(e) { if (e.clip && e.clip.length >= 3) return e.clip.map((p) => P(p.x, p.y)); const a = e.w / 2, b = e.h / 2; return [P(e.c.x - a, e.c.y - b), P(e.c.x + a, e.c.y - b), P(e.c.x + a, e.c.y + b), P(e.c.x - a, e.c.y + b)]; }
+const UNIT_MM = { 0: 1, 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 7: 1e6, 8: 0.0254, 14: 100 };
+export const unitMM = (u) => UNIT_MM[u] ?? 1;
+export const VP_SCALES = [[1, 1], [1, 2], [1, 5], [1, 10], [1, 20], [1, 25], [1, 50], [1, 75], [1, 100], [1, 125], [1, 200], [1, 250], [1, 500], [1, 1000], [1, 2000], [1, 5000], [2, 1], [5, 1], [10, 1], [20, 1], [50, 1], [100, 1]];
+export function scaleToVs(a, b, insunits) { return (a / b) * unitMM(insunits); }
+export function vsLabel(vs, insunits) {
+  const r = vs / unitMM(insunits);
+  for (const [a, b] of VP_SCALES) if (Math.abs(a / b - r) < 1e-9 * Math.max(1, r)) return `${a}:${b}`;
+  return r >= 1 ? `${G.fmt(r, 3)}:1` : `1:${G.fmt(1 / r, 3)}`;
+}
+T.VIEWPORT = {
+  bbox: (e) => vpOutline(e).reduce((b, p) => bbAdd(b, p), bbEmpty()),
+  prims: (e) => ptsToLines(vpOutline(e), true),
+  path: (c, e) => { const o = vpOutline(e); c.moveTo(o[0].x, o[0].y); for (let i = 1; i < o.length; i++) c.lineTo(o[i].x, o[i].y); c.closePath(); },
+  snaps: (e) => { const o = vpOutline(e); const s = o.map((p) => ({ p, k: 'end' })); for (let i = 0; i < o.length; i++) s.push({ p: mid(o[i], o[(i + 1) % o.length]), k: 'mid' }); return s; },
+  grips: (e) => [...vpOutline(e), e.c],
+  setGrip: (e, i, p) => {
+    const o = vpOutline(e);
+    if (i >= o.length) { const d = sub(p, e.c); e.c = p; if (e.clip) e.clip = e.clip.map((q) => add(q, d)); return; }
+    if (e.clip) { e.clip[i] = P(p.x, p.y); const b = e.clip.reduce((bb, q) => bbAdd(bb, q), bbEmpty()); const nc = P((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2); e.vc = add(e.vc, mul(sub(nc, e.c), 1 / e.vs)); e.c = nc; e.w = b.maxX - b.minX; e.h = b.maxY - b.minY; return; }
+    const opp = o[(i + 2) % 4]; const nc = mid(opp, p);
+    // mantém o conteúdo parado no papel: desloca o centro da vista junto com o centro da janela
+    e.vc = add(e.vc, mul(sub(nc, e.c), 1 / e.vs)); e.c = nc; e.w = Math.max(1, Math.abs(p.x - opp.x)); e.h = Math.max(1, Math.abs(p.y - opp.y));
+  },
+  transform: (e, m) => { const s = G.mScale(m); e.c = ap(m, e.c); e.w *= s; e.h *= s; e.vs *= s; if (e.clip) e.clip = e.clip.map((q) => ap(m, q)); },
+  info: (e, doc) => ({ 'Escala': vsLabel(e.vs, doc ? doc.header.insunits : 4), 'Largura': e.w, 'Altura': e.h, 'Ligada': e.on === false ? 'Não' : 'Sim', 'Exibição travada': e.locked ? 'Sim' : 'Não', 'Recorte': e.clip ? 'Poligonal' : 'Retangular', 'Camadas congeladas na viewport': (e.frozen || []).join(', ') || '—' }),
+  props: [['vs', 'vpscale', 'Escala'], ['locked', 'bool', 'Exibição travada'], ['on', 'bool', 'Ligada'], ['c', 'pt', 'Centro'], ['w', 'num', 'Largura'], ['h', 'num', 'Altura']],
+};
+
 // ---------- Clonagem ----------
 export function cloneEnt(e) {
   const c = {};
@@ -660,4 +693,4 @@ function structuredCloneLite(v) {
   const o = {}; for (const k in v) { const x = v[k]; o[k] = x && typeof x === 'object' ? structuredCloneLite(x) : x; } return o;
 }
 export function invalidate(e) { delete e._bb; delete e._g; delete e._pts; delete e._lay; delete e._prims; }
-export const TYPE_NAMES = { LINE: 'Linha', XLINE: 'Linha de construção', RAY: 'Raio', CIRCLE: 'Círculo', ARC: 'Arco', LWPOLYLINE: 'Polilinha', ELLIPSE: 'Elipse', SPLINE: 'Spline', POINT: 'Ponto', TEXT: 'Texto', MTEXT: 'Texto múltiplo', SOLID: 'Sólido 2D', HATCH: 'Hachura', INSERT: 'Bloco', DIMENSION: 'Cota', LEADER: 'Chamada', IMAGE: 'Imagem', WIPEOUT: 'Wipeout', ATTDEF: 'Def. atributo', '3DFACE': 'Face 3D', TRACE: 'Trace' };
+export const TYPE_NAMES = { LINE: 'Linha', XLINE: 'Linha de construção', RAY: 'Raio', CIRCLE: 'Círculo', ARC: 'Arco', LWPOLYLINE: 'Polilinha', ELLIPSE: 'Elipse', SPLINE: 'Spline', POINT: 'Ponto', TEXT: 'Texto', MTEXT: 'Texto múltiplo', SOLID: 'Sólido 2D', HATCH: 'Hachura', INSERT: 'Bloco', DIMENSION: 'Cota', LEADER: 'Chamada', IMAGE: 'Imagem', WIPEOUT: 'Wipeout', VIEWPORT: 'Viewport', ATTDEF: 'Def. atributo', '3DFACE': 'Face 3D', TRACE: 'Trace' };

@@ -54,6 +54,11 @@ export class Doc {
     this.dimstyle = { name: 'STANDARD', dimtxt: 2.5, dimasz: 2.5, dimexo: 0.625, dimexe: 1.25, dimgap: 0.625, dimdec: 2, dimadec: 0, dimscale: 1, dimlfac: 1 };
     this.header = { ltscale: 1, insunits: 4, textsize: 2.5, lunits: 2, luprec: 4, pdmode: 0, pdsize: 0, font: 'Arial' };
     this.groups = new Map(); // nome -> {name, desc, ids:Set}
+    // espaço papel: layouts (pranchas) e configurações de página nomeadas
+    this.layouts = [newLayout('Layout1'), newLayout('Layout2')];
+    this.curSpace = 'MODEL';
+    this.pageSetups = new Map();
+    this.header.psltscale = 1;
     this.curLayer = '0';
     this.textStyle = { name: 'Standard', font: 'Arial' };
     this.undoStack = []; this.redoStack = []; this.tx = null;
@@ -83,6 +88,7 @@ export class Doc {
   _remove(e) { this.ents.delete(e.id); this.grid.remove(e.id); this.version++; }
   _reindex(e) { this.version++; invalidate(e); this.grid.remove(e.id); this.grid.insert(e.id, T[e.type]?.infinite ? null : this.bbox(e)); }
   defaults(e) {
+    if (e.space === undefined && this.curSpace !== 'MODEL') e.space = this.curSpace;
     if (e.layer == null) e.layer = this.curLayer;
     if (e.color == null) e.color = 256;
     if (e.ltype == null) e.ltype = 'BYLAYER';
@@ -115,11 +121,13 @@ export class Doc {
     });
   }
   tablesChanged() { if (this.tx && !this.tx.tables) this.tx.tables = { before: this.snapTables() }; }
-  snapTables() { return JSON.stringify({ layers: [...this.layers.values()], blocks: [...this.blocks.values()].map((b) => ({ ...b, ents: b.ents.map(cloneEnt) })), dimstyle: this.dimstyle, header: this.header, curLayer: this.curLayer, groups: [...this.groups.values()].map((g) => ({ ...g, ids: [...g.ids] })) }); }
+  snapTables() { return JSON.stringify({ layers: [...this.layers.values()], blocks: [...this.blocks.values()].map((b) => ({ ...b, ents: b.ents.map(cloneEnt) })), dimstyle: this.dimstyle, header: this.header, curLayer: this.curLayer, layouts: this.layouts.map((l) => ({ ...l, view: null })), pageSetups: [...this.pageSetups.values()], groups: [...this.groups.values()].map((g) => ({ ...g, ids: [...g.ids] })) }); }
   restoreTables(s) {
     const o = JSON.parse(s); this.layers = new Map(o.layers.map((l) => [l.name, l]));
     this.blocks = new Map(o.blocks.map((b) => [b.name, b])); this.dimstyle = o.dimstyle; this.header = o.header; this.curLayer = o.curLayer; this._bbCache.clear();
     this.groups = new Map((o.groups || []).map((g) => [g.name, { ...g, ids: new Set(g.ids) }]));
+    if (o.layouts) { const views = new Map(this.layouts.map((l) => [l.name, l.view])); this.layouts = o.layouts.map((l) => ({ ...l, view: views.get(l.name) || null })); }
+    if (o.pageSetups) this.pageSetups = new Map(o.pageSetups.map((p) => [p.name, p]));
     for (const e of this.ents.values()) if (e.type === 'INSERT' || e.type === 'DIMENSION') this._reindex(e);
   }
   undo() {
@@ -163,7 +171,10 @@ export class Doc {
     for (const id of ids) { const e = this.ents.get(id); if (e && G.bbOverlap(this.bbox(e), bb)) out.push(e); else if (e && T[e.type]?.infinite) out.push(e); }
     return out;
   }
-  visible(e) { if (this.hidden && this.hidden.has(e.id)) return false; const L = this.layers.get(e.layer); return !L || (L.on && !L.frozen); }
+  visible(e, space = this.curSpace) { if ((e.space || 'MODEL') !== space) return false; if (this.hidden && this.hidden.has(e.id)) return false; const L = this.layers.get(e.layer); return !L || (L.on && !L.frozen); }
+  layout(name) { return this.layouts.find((l) => l.name === name) || null; }
+  spaceEnts(space) { const out = []; for (const e of this.ents.values()) if ((e.space || 'MODEL') === space) out.push(e); return out; }
+  uniqueLayoutName(base = 'Layout') { let i = 1; while (this.layout(base + i)) i++; return base + i; }
   extents(onlyVisible = true) {
     const b = G.bbEmpty();
     for (const e of this.ents.values()) { if (onlyVisible && !this.visible(e)) continue; if (T[e.type]?.infinite) continue; const bb = this.bbox(e); if (G.bbValid(bb)) G.bbUnion(b, bb); }
@@ -189,4 +200,18 @@ export class Doc {
   }
   uniqueLayerName(base = 'Camada') { let i = 1; while (this.layers.has(base + i)) i++; return base + i; }
 }
+// ---- papéis e layouts
+export const PAPER_SIZES = {
+  'ISO A4': [297, 210], 'ISO A3': [420, 297], 'ISO A2': [594, 420], 'ISO A1': [841, 594], 'ISO A0': [1189, 841],
+  'ISO A4 estendido': [297 + 0, 210], 'ANSI A (Carta)': [279.4, 215.9], 'Ofício': [355.6, 215.9], 'ANSI B (Tabloide)': [431.8, 279.4], 'ANSI C': [558.8, 431.8], 'ANSI D': [863.6, 558.8], 'ARCH D': [914.4, 609.6],
+};
+export function defaultPage(paper = 'ISO A3') {
+  return { paper, custom: null, landscape: true, margin: 5, device: 'PDF', area: 'layout', fit: false, scale: 1, units: 'mm', center: false, offX: 0, offY: 0, ctb: 'none', lwt: true, plotStyles: true, psLast: true, hidePs: false, upside: false, scaleLw: false, name: '' };
+}
+export function pageSize(p) {
+  let [w, h] = p.custom || PAPER_SIZES[p.paper] || PAPER_SIZES['ISO A3'];
+  if (w < h) [w, h] = [h, w];
+  return p.landscape ? [w, h] : [h, w];
+}
+export function newLayout(name, page) { return { name, page: page ? { ...page } : defaultPage(), view: null, inited: false }; }
 function cloneWithId(e) { const c = cloneEnt(e); c.id = e.id; return c; }
