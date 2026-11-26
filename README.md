@@ -56,7 +56,17 @@ O assistente usa ferramentas do próprio programa (ler o desenho, desenhar pared
 
 Dois modos:
 - **Claude nativo**: quando a página é aberta dentro do claude.ai, usa a conta Claude de quem está vendo, sem chave.
+- **Créditos gratuitos do site**: quem abre o site sem chave usa uma cota diária paga pelo dono do site (veja abaixo).
 - **API Anthropic**: no site próprio, informe uma chave da API (console.anthropic.com) em *Configurar IA*. A chave fica só no navegador (localStorage) e é enviada apenas para api.anthropic.com; o uso é cobrado na sua conta da API.
+
+### Créditos gratuitos (site no Cloudflare)
+
+O arquivo `worker/index.js` (configurado em `wrangler.jsonc`) serve o site e oferece IA grátis com a chave do dono, que fica só no Cloudflare:
+1. Cloudflare → Workers & Pages → `web-cad` → Settings → Variables and Secrets → adicionar **Secret** `ANTHROPIC_API_KEY` com a sua chave.
+2. Limites (em `wrangler.jsonc`, ou em Variables): `FREE_MODEL` (padrão `claude-sonnet-5-5`), `FREE_CENTS_PER_USER` (cota diária por pessoa, em centavos de dólar; padrão 25) e `FREE_CENTS_TOTAL` (teto diário do site inteiro; padrão 100 = US$ 1/dia).
+3. Cada pessoa é identificada pelo e-mail do Cloudflare Access (ou pelo IP, se o Access estiver desligado). O navegador não escolhe o modelo nem vê a chave.
+
+Sem o secret, os créditos gratuitos ficam desligados e nada é cobrado.
 
 ## Recursos
 - **Desenho:** LINE, PLINE (com arcos e largura), CIRCLE (centro/raio, diâmetro, 2P, 3P, TTR), ARC (3P, início-centro-fim, início-fim-raio, centro-início-fim), RECTANG, POLYGON, ELLIPSE (inclusive arco elíptico), SPLINE, POINT (com estilo de ponto), XLINE, RAY, DONUT, REVCLOUD, WIPEOUT, TEXT, MTEXT, HATCH (14 padrões + sólido, contorno por ponto interno com ilhas), GRADIENT, BOUNDARY, TABLE (aceita colar do Excel)

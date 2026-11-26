@@ -1,0 +1,14 @@
+{
+  // Worker "web-cad": arquivos estáticos + créditos gratuitos de IA em /api/*
+  "name": "web-cad",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-09-01",
+  "assets": { "directory": "./", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  "durable_objects": { "bindings": [{ "name": "QUOTA", "class_name": "Quota" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Quota"] }],
+  "vars": {
+    "FREE_MODEL": "claude-sonnet-5-5",
+    "FREE_CENTS_PER_USER": "25",
+    "FREE_CENTS_TOTAL": "100"
+  }
+}

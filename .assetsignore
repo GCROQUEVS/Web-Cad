@@ -1,0 +1,6 @@
+.git
+worker
+wrangler.jsonc
+node_modules
+.wrangler
+app.html

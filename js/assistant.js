@@ -323,7 +323,18 @@ async function shrinkImage(file, max = 1568) {
 }
 
 // ---------------------------------------------------------------- backend: API Anthropic (chave do usuário)
-async function callApi(cfg, body, signal) {
+async function callApi(cfg, body, signal, free) {
+  if (free) {
+    const res = await fetch('api/ai/messages', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (data?.error?.type === 'free_quota') throw Object.assign(new Error(data.error.message), { quota: true });
+      if (res.status === 429) throw new Error('Muita gente usando agora (429). Tente de novo em instantes.');
+      if (res.status >= 500) throw new Error(data?.error?.message || ('Serviço indisponível (' + res.status + '). Tente novamente em instantes.'));
+      throw new Error(`Erro ${res.status}: ${data?.error?.message || res.statusText}`);
+    }
+    return data;
+  }
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', signal,
     headers: {
@@ -356,18 +367,28 @@ export class Assistant {
     this.busy = false; this.ctl = null;
     this.sample = null; this.sampleChecked = false;
     this.build();
-    this.detectNative();
+    this.detectNative(); this.checkFree();
   }
   save() { try { localStorage.setItem(LS, JSON.stringify(this.cfg)); } catch { /* */ } }
   async detectNative() {
     try { if (window.claude && window.claude.use) { this.sample = await window.claude.use('sample'); if (this.sample && this.sample.limits) this.limits = await this.sample.limits().catch(() => null); } } catch { this.sample = null; }
     this.sampleChecked = true; this.refreshMode();
   }
+  // créditos gratuitos oferecidos pelo próprio site (worker/index.js no Cloudflare)
+  async checkFree() {
+    try {
+      if (!/^https?:$/.test(location.protocol)) { this.free = null; }
+      else { const r = await fetch('api/ai/status', { cache: 'no-store' }); const j = r.ok && /json/.test(r.headers.get('content-type') || '') ? await r.json() : null; this.free = j && j.enabled ? j : null; }
+    } catch { this.free = null; }
+    this.freeChecked = true; this.refreshMode();
+  }
   backend() {
     if (this.cfg.mode === 'native') return this.sample ? 'native' : null;
     if (this.cfg.mode === 'api') return this.cfg.key ? 'api' : null;
+    if (this.cfg.mode === 'free') return this.free ? 'free' : null;
     if (this.sample) return 'native';
-    return this.cfg.key ? 'api' : null;
+    if (this.cfg.key) return 'api';
+    return this.free ? 'free' : null;
   }
   build() {
     const root = h('div', { id: 'aiPanel', class: 'aipanel' });
@@ -410,12 +431,12 @@ export class Assistant {
   }
   refreshMode() {
     const b = this.backend();
-    this.modeEl.textContent = b === 'native' ? 'Claude (nativo)' : b === 'api' ? (MODELS.find((m) => m[0] === this.cfg.model)?.[1].split(' (')[0] || this.cfg.model) : 'não configurado';
+    this.modeEl.textContent = b === 'native' ? 'Claude (nativo)' : b === 'free' ? `Grátis · ${this.free.remaining_pct ?? 0}% hoje` : b === 'api' ? (MODELS.find((m) => m[0] === this.cfg.model)?.[1].split(' (')[0] || this.cfg.model) : 'não configurado';
     this.modeEl.classList.toggle('off', !b);
-    const imgOk = b === 'api' || (b === 'native' && this.limits?.images);
+    const imgOk = b === 'api' || b === 'free' || (b === 'native' && this.limits?.images);
     this.imgBtn.disabled = !imgOk; this.imgBtn.title = imgOk ? 'Anexar imagem de referência (também pode colar com Ctrl+V)' : 'Imagens indisponíveis neste modo';
   }
-  show() { this.root.hidden = false; this.refreshMode(); setTimeout(() => this.input.focus(), 0); if (this.sampleChecked && !this.backend()) this.settings(); try { localStorage.setItem('webcad.aipanel', '1'); } catch { /* */ } }
+  show() { this.root.hidden = false; this.refreshMode(); setTimeout(() => this.input.focus(), 0); if (this.sampleChecked && this.freeChecked && !this.backend()) this.settings(); try { localStorage.setItem('webcad.aipanel', '1'); } catch { /* */ } }
   hide() { this.root.hidden = true; try { localStorage.setItem('webcad.aipanel', '0'); } catch { /* */ } }
   toggle() { if (this.root.hidden) this.show(); else this.hide(); }
   ask(text) { this.show(); this.input.value = text; this.input.focus(); }
@@ -450,7 +471,7 @@ export class Assistant {
     this.setBusy(true); this.ctl = new AbortController();
     const tools = makeTools(this.app, this.ui, (s) => this.step(s));
     try {
-      const final = b === 'native' ? await this.runNative(text, imgs, tools, out) : await this.runApi(text, imgs, tools, out);
+      const final = b === 'native' ? await this.runNative(text, imgs, tools, out) : await this.runApi(text, imgs, tools, out, b === 'free');
       out.classList.remove('thinking'); out.textContent = final || 'Pronto.';
     } catch (e) {
       out.classList.remove('thinking');
@@ -458,7 +479,8 @@ export class Assistant {
       if (code === 'cancelled' || e?.name === 'AbortError') out.textContent = (e.text || out.textContent.replace('Pensando…', '')).trim() + '\n[interrompido]';
       else out.textContent = (e?.text ? e.text + '\n\n' : '') + '⚠ ' + this.errText(e);
       out.parentElement.classList.add('err');
-    } finally { this.setBusy(false); this.ctl = null; this.log.scrollTop = this.log.scrollHeight; }
+      if (e?.quota) out.textContent += '\nPara continuar hoje, informe sua própria chave da API em Configurar (⚙).';
+    } finally { if (b === 'free') this.checkFree(); this.setBusy(false); this.ctl = null; this.log.scrollTop = this.log.scrollHeight; }
   }
   errText(e) {
     const m = { not_granted: 'Você não autorizou o uso do Claude nesta página.', rate_limited: 'Limite de uso do Claude atingido. Tente mais tarde.', tools_unavailable: 'Este visualizador não permite que o Claude use as ferramentas da página. Use o modo API em Configurar.', images_unavailable: 'Este visualizador não aceita imagens.', image_rejected: 'Imagem recusada (tipo ou tamanho).', refused: 'O pedido foi recusado.' };
@@ -478,7 +500,7 @@ export class Assistant {
     return r.text + (r.truncated ? '\n[resposta cortada]' : '');
   }
   // --- modo API (chave própria)
-  async runApi(text, imgs, tools, out) {
+  async runApi(text, imgs, tools, out, free) {
     const content = [...imgs.map((i) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: i.b64 } })), { type: 'text', text: (text || 'Use a imagem anexada como referência.') + (this.app.doc.ents.size ? `\n\n[O desenho tem ${this.app.doc.ents.size} objetos.]` : '\n\n[O desenho está vazio.]') }];
     this.apiMsgs.push({ role: 'user', content });
     const toolDefs = TOOL_DEFS.map((t) => ({ name: t.name, description: t.description, input_schema: t.schema }));
@@ -486,7 +508,9 @@ export class Assistant {
     for (let round = 0; round < 25; round++) {
       const body = { model: this.cfg.model, max_tokens: 16000, system: rules(this.app), tools: toolDefs, messages: this.apiMsgs, fallbacks: 'default' };
       if (this.cfg.model !== 'claude-haiku-5-5') body.output_config = { effort: this.cfg.effort || 'medium' };
-      const res = await callApi(this.cfg, body, this.ctl.signal);
+      if (free) { delete body.fallbacks; delete body.output_config; }
+      let res;
+      try { res = await callApi(this.cfg, body, this.ctl.signal, free); } catch (err) { if (round === 0) this.apiMsgs.pop(); throw err; }
       this.apiMsgs.push({ role: 'assistant', content: res.content });
       const txt = res.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
       if (txt) { shown = (shown ? shown + '\n\n' : '') + txt; out.classList.remove('thinking'); out.textContent = shown; }
@@ -507,13 +531,14 @@ export class Assistant {
   settings() {
     const ui = this.ui, c = this.cfg;
     const native = !!this.sample;
-    const mode = h('select', {}, h('option', { value: 'auto' }, 'Automático'), h('option', { value: 'native', disabled: !native }, 'Claude nativo (claude.ai)' + (native ? '' : ' — indisponível aqui')), h('option', { value: 'api' }, 'API Anthropic (minha chave)'));
+    const mode = h('select', {}, h('option', { value: 'auto' }, 'Automático'), h('option', { value: 'native', disabled: !native }, 'Claude nativo (claude.ai)' + (native ? '' : ' — indisponível aqui')), h('option', { value: 'api' }, 'API Anthropic (minha chave)'), h('option', { value: 'free', disabled: !this.free }, 'Créditos gratuitos do site' + (this.free ? '' : ' — indisponível aqui')));
     mode.value = c.mode;
     const key = h('input', { type: 'password', value: c.key || '', placeholder: 'sk-ant-...', autocomplete: 'off', style: 'width:100%' });
     const model = h('select', {}, ...MODELS.map(([v, l]) => h('option', { value: v }, l))); model.value = c.model;
     const effort = h('select', {}, h('option', { value: 'low' }, 'Baixo (mais rápido)'), h('option', { value: 'medium' }, 'Médio'), h('option', { value: 'high' }, 'Alto (mais cuidadoso)')); effort.value = c.effort || 'medium';
     const body = h('div', { class: 'ai-set' },
       h('p', { class: 'dim' }, native ? 'Esta página está aberta dentro do claude.ai: o modo nativo usa a sua própria conta Claude, sem chave.' : 'Fora do claude.ai o assistente usa a API da Anthropic com a sua chave. Crie uma em console.anthropic.com → API Keys. O uso é cobrado na sua conta da API.'),
+      this.free ? h('p', { class: 'dim' }, `Este site oferece créditos gratuitos diários (restam ${this.free.remaining_pct ?? 0}% hoje). Sem chave, eles são usados automaticamente.`) : null,
       h('label', {}, 'Modo'), mode,
       h('label', {}, 'Chave da API Anthropic'), key,
       h('p', { class: 'dim small' }, 'A chave fica salva apenas neste navegador (localStorage) e é enviada somente para api.anthropic.com.'),
