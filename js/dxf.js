@@ -2,6 +2,7 @@
 import * as G from './geom.js';
 import { T, mtextLayout, cleanText, isSimilar } from './entities.js';
 import { LINETYPES } from './colors.js';
+import { solidCache } from './solid.js';
 import { pageSize, PAPER_SIZES, defaultPage, newLayout } from './doc.js';
 const { P } = G;
 const D2R = Math.PI / 180;
@@ -283,7 +284,14 @@ function convertList(list, doc, stats, inBlock) {
 function negZ(o) { return gv(o, 230) != null && gf(o, 230) < -0.5; }
 function convPolyline(o, verts) {
   const flags = gi(o, 70);
-  if (flags & 64) { // malha polyface: desenha arestas visíveis das faces
+  if (flags & 64) { // malha polyface -> sólido 3D (malha triangular)
+    const vv = verts.filter((v) => gi(v, 70) & 64); const fr = verts.filter((v) => (gi(v, 70) & 192) === 128);
+    if (vv.length >= 4 && fr.length >= 4) {
+      const v = []; for (const x of vv) v.push(gf(x, 10), gf(x, 20), gf(x, 30) || 0);
+      const t = [];
+      for (const f of fr) { const idx = [71, 72, 73, 74].map((c) => Math.abs(gi(f, c))).filter((x) => x > 0 && x <= vv.length).map((x) => x - 1); if (idx.length >= 3) { t.push(idx[0], idx[1], idx[2]); if (idx.length === 4 && idx[3] !== idx[2]) t.push(idx[0], idx[2], idx[3]); } }
+      if (t.length) return [{ ...common(o), type: '3DSOLID', mesh: { v, t } }];
+    }
     const pos = verts.filter((v) => gi(v, 70) & 64).map((v) => P(gf(v, 10), gf(v, 20)));
     const out = []; const seen = new Set();
     for (const f of verts.filter((v) => (gi(v, 70) & 192) === 128)) {
@@ -322,7 +330,7 @@ function convEnt(o, doc) {
   switch (o.type) {
     case 'LINE': e = { ...c, type: 'LINE', p1: p10(), p2: p11() }; break;
     case 'XLINE': case 'RAY': e = { ...c, type: o.type, p: p10(), dir: G.norm(p11()) }; break;
-    case 'CIRCLE': e = { ...c, type: 'CIRCLE', c: p10(), r: gf(o, 40) }; break;
+    case 'CIRCLE': e = { ...c, type: 'CIRCLE', c: p10(), r: gf(o, 40) }; if (gf(o, 30)) e.elev = gf(o, 30); break;
     case 'ARC': e = { ...c, type: 'ARC', c: p10(), r: gf(o, 40), sa: G.normAng(gf(o, 50) * D2R), ea: G.normAng(gf(o, 51) * D2R) }; break;
     case 'POINT': e = { ...c, type: 'POINT', p: p10() }; break;
     case 'LWPOLYLINE': {
@@ -333,7 +341,7 @@ function convEnt(o, doc) {
         else if (k === 42 && cur) cur.b = parseFloat(v);
       }
       e = { ...c, type: 'LWPOLYLINE', pts, closed: !!(gi(o, 70) & 1) };
-      const w = gf(o, 43); if (w) e.width = w;
+      const w = gf(o, 43); if (w) e.width = w; if (gf(o, 38)) e.elev = gf(o, 38);
       break;
     }
     case 'ELLIPSE': {
@@ -731,16 +739,37 @@ function vpTail(w, vc, vh, frozenH, flags, clipH) {
   w.g(90, flags); if (clipH) w.g(340, clipH);
   w.g(1, ''); w.g(281, 0); w.g(71, 1); w.g(74, 0); w.g(110, 0); w.g(120, 0); w.g(130, 0); w.g(111, 1); w.g(121, 0); w.g(131, 0); w.g(112, 0); w.g(122, 1); w.g(132, 0); w.g(79, 0); w.g(146, 0);
 }
+// sólido -> malha poliface: vértices soldados e faces triangulares; arestas suaves ficam invisíveis (índice negativo)
+function polyface(e) {
+  const c = solidCache(e), v0 = e.mesh.v, t = e.mesh.t, id = c.id; const map = new Map(); const v = [];
+  const idx = (i) => { const w = id[i]; let k = map.get(w); if (k === undefined) { k = v.length / 3 + 1; map.set(w, k); v.push(v0[w * 3], v0[w * 3 + 1], v0[w * 3 + 2]); } return k; };
+  const hard = new Set(); for (let i = 0; i < c.hard.length; i += 2) { const a = c.hard[i], b = c.hard[i + 1]; hard.add(a < b ? a + ',' + b : b + ',' + a); }
+  const f = [];
+  for (let i = 0; i < t.length; i += 3) {
+    const ids = [id[t[i]], id[t[i + 1]], id[t[i + 2]]]; if (ids[0] === ids[1] || ids[1] === ids[2] || ids[0] === ids[2]) continue;
+    for (let k = 0; k < 3; k++) { const a = ids[k], b = ids[(k + 1) % 3]; const vis = hard.has(a < b ? a + ',' + b : b + ',' + a); const n = idx(t[i + k]); f.push(vis ? n : -n); }
+  }
+  return { v, f };
+}
 function writeEnt(ctx, e, owner) {
   const w = ctx.w, doc = ctx.doc;
   switch (e.type) {
     case 'LINE': head(ctx, e, 'LINE', owner, 'AcDbLine'); w.pt(10, e.p1); w.pt(11, e.p2); break;
     case 'XLINE': case 'RAY': head(ctx, e, e.type, owner, e.type === 'XLINE' ? 'AcDbXline' : 'AcDbRay'); w.pt(10, e.p); w.pt(11, e.dir); break;
-    case 'CIRCLE': head(ctx, e, 'CIRCLE', owner, 'AcDbCircle'); w.pt(10, e.c); w.g(40, e.r); break;
+    case 'CIRCLE': head(ctx, e, 'CIRCLE', owner, 'AcDbCircle'); w.g(10, e.c.x); w.g(20, e.c.y); w.g(30, e.elev || 0); w.g(40, e.r); break;
     case 'ARC': head(ctx, e, 'ARC', owner, 'AcDbCircle'); w.pt(10, e.c); w.g(40, e.r); w.g(100, 'AcDbArc'); w.g(50, e.sa * R2D); w.g(51, e.ea * R2D); break;
     case 'POINT': head(ctx, e, 'POINT', owner, 'AcDbPoint'); w.pt(10, e.p); break;
+    case '3DSOLID': {
+      const h = head(ctx, e, 'POLYLINE', owner, 'AcDbPolyFaceMesh'); const pf = polyface(e);
+      w.g(66, 1); w.g(10, 0); w.g(20, 0); w.g(30, 0); w.g(70, 64); w.g(71, pf.v.length / 3); w.g(72, pf.f.length / 3);
+      const L = e.layer || '0';
+      for (let i = 0; i < pf.v.length; i += 3) { w.g(0, 'VERTEX'); w.g(5, w.handle()); w.g(330, h); w.g(100, 'AcDbEntity'); w.g(8, L); w.g(100, 'AcDbVertex'); w.g(100, 'AcDbPolyFaceMeshVertex'); w.g(10, pf.v[i]); w.g(20, pf.v[i + 1]); w.g(30, pf.v[i + 2]); w.g(70, 192); }
+      for (let i = 0; i < pf.f.length; i += 3) { w.g(0, 'VERTEX'); w.g(5, w.handle()); w.g(330, h); w.g(100, 'AcDbEntity'); w.g(8, L); w.g(100, 'AcDbFaceRecord'); w.g(10, 0); w.g(20, 0); w.g(30, 0); w.g(70, 128); w.g(71, pf.f[i]); w.g(72, pf.f[i + 1]); w.g(73, pf.f[i + 2]); }
+      w.g(0, 'SEQEND'); w.g(5, w.handle()); w.g(330, h); w.g(100, 'AcDbEntity'); w.g(8, L);
+      break;
+    }
     case 'LWPOLYLINE':
-      head(ctx, e, 'LWPOLYLINE', owner, 'AcDbPolyline'); w.g(90, e.pts.length); w.g(70, e.closed ? 1 : 0); if (e.width) w.g(43, e.width);
+      head(ctx, e, 'LWPOLYLINE', owner, 'AcDbPolyline'); w.g(90, e.pts.length); w.g(70, e.closed ? 1 : 0); if (e.width) w.g(43, e.width); if (e.elev) w.g(38, e.elev);
       for (const p of e.pts) { w.g(10, p.x); w.g(20, p.y); if (p.b) w.g(42, p.b); }
       break;
     case 'ELLIPSE': head(ctx, e, 'ELLIPSE', owner, 'AcDbEllipse'); w.pt(10, e.c); w.pt(11, e.maj); w.g(210, 0); w.g(220, 0); w.g(230, 1); w.g(40, Math.min(1, e.ratio)); w.g(41, e.sp ?? 0); w.g(42, e.ep ?? Math.PI * 2); break;
@@ -892,6 +921,10 @@ function writeDxfR12(doc) {
       case 'POINT': g(0, 'POINT'); base(); ptw(10, e.p); break;
       case 'TEXT': case 'ATTRIB': g(0, 'TEXT'); base(); ptw(10, e.p); g(40, e.h); g(1, cleanText(e.str)); if (e.rot) g(50, e.rot * R2D); if (e.ha) g(72, e.ha); if ((e.ha || e.va) && e.p2) ptw(11, e.p2); if (e.va) g(73, e.va); break;
       case 'SOLID': g(0, 'SOLID'); base(); e.pts.forEach((p, i) => ptw(10 + i, p)); break;
+      case '3DSOLID': { const pf = polyface(e); g(0, 'POLYLINE'); base(); g(66, 1); g(10, 0); g(20, 0); g(30, 0); g(70, 64); g(71, pf.v.length / 3); g(72, pf.f.length / 3);
+        for (let i = 0; i < pf.v.length; i += 3) { g(0, 'VERTEX'); g(8, e.layer || '0'); g(10, pf.v[i]); g(20, pf.v[i + 1]); g(30, pf.v[i + 2]); g(70, 192); }
+        for (let i = 0; i < pf.f.length; i += 3) { g(0, 'VERTEX'); g(8, e.layer || '0'); g(10, 0); g(20, 0); g(30, 0); g(70, 128); g(71, pf.f[i]); g(72, pf.f[i + 1]); g(73, pf.f[i + 2]); }
+        g(0, 'SEQEND'); g(8, e.layer || '0'); break; }
       case 'LWPOLYLINE': g(0, 'POLYLINE'); base(); g(66, 1); ptw(10, P(0, 0)); g(70, e.closed ? 1 : 0); if (e.width) { g(40, e.width); g(41, e.width); }
         for (const p of e.pts) { g(0, 'VERTEX'); g(8, e.layer || '0'); ptw(10, p); if (p.b) g(42, p.b); }
         g(0, 'SEQEND'); g(8, e.layer || '0'); break;

@@ -6,6 +6,7 @@ import { T, cloneEnt, makePattern, HATCH_PATTERNS, TYPE_NAMES } from './entities
 import { saveOptions, applyOptions } from './options.js';
 import { h, icon } from './ribbon.js';
 import { Cancel } from './app.js';
+import * as S from './solid.js';
 
 const LS = 'webcad.ai';
 const MODELS = [
@@ -40,6 +41,7 @@ Planta baixa (quando pedirem):
 - Se receber uma imagem de referência (croqui, foto de planta), interprete proporções, cômodos e aberturas e reproduza fielmente com medidas plausíveis; diga quais medidas você estimou.
 - Envie MUITAS entidades por chamada de draw (dezenas de uma vez) para terminar em poucas rodadas. Ao final chame configure com zoom "extents".
 
+Modelos 3D (quando pedirem 3D/maquete/volume): use os tipos box, cylinder, sphere, extrude e wall3d (parede com altura, ex. h 2800 mm) no draw; depois mostre em 3D com run_command {command:"VISTA_SW"} e {command:"VSCURRENT", inputs:["Conceitual"]}. Booleanas: run_command "UNION"/"SUBTRACT" exigem seleção interativa, então prefira montar as peças já no formato final.
 Configurações: use configure para camadas, unidades, grade, snap, orto, polar, cores de fundo, tema claro/escuro, estilo de cota, etc. Para comandos do próprio programa use run_command (ex.: "ZOOM" com entradas ["E"], "PURGE", "LAYOUT"...).
 Tudo o que você faz pode ser desfeito com Ctrl+Z; não peça confirmação para desenhar, mas peça antes de apagar o desenho inteiro.
 Ao terminar, resuma em 1-3 frases o que foi feito.`;
@@ -50,7 +52,8 @@ const ENT_DOC = `Lista de entidades. Cada item tem "type" e campos opcionais "la
 line {x1,y1,x2,y2} | polyline {pts:[[x,y],...], closed?, width?} | rect {x,y,w,h} (canto inferior esquerdo) | circle {cx,cy,r} | arc {cx,cy,r,start,end} (graus, anti-horário) | ellipse {cx,cy,rx,ry,rot?}
 text {x,y,text,h,rot?,align:"left"|"center"|"right"} (texto com \\n vira texto múltiplo) | dim {x1,y1,x2,y2,offset,orient:"aligned"|"horizontal"|"vertical"} (offset = distância da linha de cota, + para cima/esquerda)
 hatch {loops:[[[x,y],...]], pattern:"SOLID"|"ANSI31"|"ANSI37"|"AR-CONC"|..., scale?, angle?}
-wall {pts:[[x,y],...], t (espessura), closed?, hatch?:"SOLID"|"ANSI31"} (pts = eixo da parede) | door {x,y (dobradiça), w (largura), angle (direção da folha fechada), swing:"left"|"right"} | window {x1,y1,x2,y2,t (espessura da parede)}`;
+wall {pts:[[x,y],...], t (espessura), closed?, hatch?:"SOLID"|"ANSI31"} (pts = eixo da parede)
+Sólidos 3D: box {x,y,z?,w,d,h} | cylinder {cx,cy,z?,r,h,r_top?} | sphere {cx,cy,cz?,r} | extrude {pts:[[x,y],...], h, z?} (perfil fechado extrudado) | wall3d {pts, t, h, closed?} (parede 3D com altura) | door {x,y (dobradiça), w (largura), angle (direção da folha fechada), swing:"left"|"right"} | window {x1,y1,x2,y2,t (espessura da parede)}`;
 
 export const TOOL_DEFS = [
   { name: 'get_drawing', description: 'Lê o estado do desenho: unidades, limites, camadas (com contagem), tipos de objetos, camada atual, seleção e opcionalmente a geometria resumida das entidades (com ids). Use antes de editar algo existente.',
@@ -201,8 +204,22 @@ export function makeTools(app, ui, log) {
       }
       return out;
     },
-    draw(a) {
-      const items = Array.isArray(a.entities) ? a.entities : []; if (!items.length) throw new Error('entities vazio');
+    async draw(a) {
+      const items0 = Array.isArray(a.entities) ? a.entities : []; if (!items0.length) throw new Error('entities vazio');
+      const items = [];
+      for (const it of items0) {
+        const t3 = String(it && it.type || '').toLowerCase();
+        try {
+          let mesh = null;
+          if (t3 === 'box') mesh = await S.makeBox(num(it.x), num(it.y), num(it.z), num(it.w, 1), num(it.d ?? it.depth, 1), num(it.h, 1));
+          else if (t3 === 'cylinder') mesh = await S.makeCylinder({ x: num(it.cx ?? it.x), y: num(it.cy ?? it.y), z: num(it.z) }, Math.abs(num(it.r, 1)), num(it.h, 1), it.r_top != null ? Math.abs(num(it.r_top)) : Math.abs(num(it.r, 1)));
+          else if (t3 === 'sphere') mesh = await S.makeSphere({ x: num(it.cx ?? it.x), y: num(it.cy ?? it.y), z: num(it.cz ?? it.z) }, Math.abs(num(it.r, 1)));
+          else if (t3 === 'extrude') { const pts = (it.pts || []).map(pt).filter(Boolean); if (pts.length < 3) throw new Error('extrude precisa de 3+ pontos'); mesh = await S.extrudeLoops([pts], num(it.z), num(it.h, 1)); }
+          else if (t3 === 'wall3d') { const w = buildItem({ ...it, type: 'wall', hatch: false }, app); const loops = w.map((e) => e.pts.map((q) => ({ x: q.x, y: q.y }))); mesh = await S.extrudeLoops(loops, num(it.z), num(it.h, 2800)); }
+          if (mesh) { items.push({ __solid: mesh, layer: it.layer, color: it.color }); continue; }
+        } catch (err) { items.push({ type: '__erro', msg: err.message }); continue; }
+        items.push(it);
+      }
       const errors = []; const ids = []; const bb = G.bbEmpty ? G.bbEmpty() : { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
       tx('desenhar', (d) => {
         const prevSpace = d.curSpace; d.curSpace = 'MODEL';
@@ -210,7 +227,9 @@ export function makeTools(app, ui, log) {
           if (a.layer) ensureLayer(d, String(a.layer));
           items.forEach((it, i) => {
             try {
-              for (const e of buildItem(it, app)) {
+              if (it.type === '__erro') throw new Error(it.msg);
+              const built = it.__solid ? [{ type: '3DSOLID', mesh: it.__solid, ...(it.layer ? { layer: String(it.layer) } : {}), ...(it.color != null ? { color: num(it.color, 256) } : {}) }] : buildItem(it, app);
+              for (const e of built) {
                 if (!e.layer && a.layer) e.layer = String(a.layer);
                 ensureLayer(d, e.layer);
                 const added = app.addEnt(e); ids.push(added.id);

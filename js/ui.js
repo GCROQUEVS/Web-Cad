@@ -12,6 +12,7 @@ import { cloneEnt } from './entities.js';
 import { OSNAP_KINDS } from './app.js';
 import { buildChrome, renderDocTabs, LayerPalette, icon, popupMenu } from './ribbon.js';
 import { Assistant } from './assistant.js';
+import { PRESETS as PRESETS3 } from './cam3.js';
 import { setFont } from './entities.js';
 import { optionsDialog } from './options.js';
 
@@ -75,6 +76,22 @@ export class UI {
   }
   targetDocForStart() { this.startOpen = false; this.startEl.hidden = true; return this.targetDoc(); }
   toggleLayerPalette() { this.layerPalette.toggle(); }
+  // rótulo da janela (estilo CAD de mesa): [-][Vista][Estilo visual] no canto superior esquerdo
+  updateVpLabel() {
+    const app = this.app; let el = this._vpl;
+    if (!el) { el = this._vpl = h('div', { class: 'vplabel' }); $('#canvasWrap').append(el); }
+    const model = !app.space || app.space === 'MODEL'; const v = app.vp, view = v.view;
+    const STY = { '2dwire': 'Estrutura de arame 2D', wire: 'Estrutura de arame', hidden: 'Oculto', realistic: 'Realista', conceptual: 'Conceitual', shaded: 'Sombreado', shadedEdges: 'Sombreado com arestas', gray: 'Tons de cinza', xray: 'Raio X' };
+    let vn = 'Superior'; if (view.d3) { vn = 'Personalizada'; for (const p of Object.values(PRESETS3)) if (Math.abs(((view.d3.az - p.az) % 360 + 540) % 360 - 180) < 0.5 && Math.abs(view.d3.el - p.el) < 0.5) vn = p.label; if (view.d3.persp) vn += ' (persp.)'; }
+    const key = [model, v.x, v.y, vn, view.style].join('|'); if (key === this._vplKey) return; this._vplKey = key;
+    el.style.display = model && app.settings.vpLabel !== false ? '' : 'none'; el.style.left = (v.x + 6) + 'px'; el.style.top = (v.y + 4) + 'px';
+    el.innerHTML = '';
+    const sp = (t, items) => h('span', { class: 'vpl-b', onclick: (ev) => popupMenu(ev.currentTarget, items()) }, '[' + t + ']');
+    el.append(
+      sp('-', () => [{ label: 'Janela única', act: () => app.setLayout('single') }, { label: 'Duas: verticais', act: () => app.setLayout('v2') }, { label: 'Três', act: () => app.setLayout('three') }, { label: 'Quatro', act: () => app.setLayout('four') }, '-', { label: 'Cubo de navegação', checked: app.settings.viewcube !== false, act: () => { app.settings.viewcube = app.settings.viewcube === false; app.dirty.over = true; } }]),
+      sp(vn, () => [{ label: 'Planta (2D)', act: () => app.setView3(null) }, '-', ...Object.entries(PRESETS3).map(([k, p]) => ({ label: p.label, act: () => app.setView3(k, { fit: true }) })), '-', { label: 'Paralela', checked: !(view.d3 && view.d3.persp), act: () => { if (view.d3) { view.d3.persp = false; app.redraw(); this._vplKey = null; } } }, { label: 'Perspectiva', checked: !!(view.d3 && view.d3.persp), act: () => { if (!view.d3) view.d3 = { az: -135, el: 35.264, tz: 0 }; view.d3.persp = true; app.redraw(); this._vplKey = null; } }]),
+      sp(STY[view.style || '2dwire'], () => Object.entries(STY).map(([k, l]) => ({ label: l, checked: (view.style || '2dwire') === k, act: () => app.setStyle(k) }))));
+  }
   showBlockBar(name) {
     let bar = $('#blockBar');
     if (!name) { if (bar) bar.remove(); document.body.classList.remove('block-editing'); return; }
@@ -96,7 +113,7 @@ export class UI {
     app.onEcho = (t) => { const last = this.histEl.lastElementChild; if (last && last.classList.contains('prompt')) last.append(h('span', { class: 'echo' }, ' ' + t)); };
     app.echoCmd = (n) => { this.addHist('Comando: ' + n, 'cmd'); if (this.cmdHist[this.cmdHist.length - 1] !== n) this.cmdHist.push(n); this.histIdx = -1; };
     app.onPrompt = (p, kws) => this.setPrompt(p, kws);
-    app.onCursor = (p) => { this.coordEl.textContent = `${G.fmt(p.x, 4)}, ${G.fmt(p.y, 4)}, 0`; };
+    app.onCursor = (p) => { this.coordEl.textContent = `${G.fmt(p.x, 4)}, ${G.fmt(p.y, 4)}, ${G.fmt(p.z || 0, 4)}`; };
     app.onSettings = () => this.refreshStatus();
     app.onSelChange = () => { this.refreshProps(); this.refreshStatus(); if (this.app.curLayout()) this.layerPalette.render(); };
     app.onDocChange = () => {
@@ -643,12 +660,13 @@ export class UI {
   // ---------- exportação ----------
   async exportDialog() {
     const app = this.app;
-    const fmt = h('select', {}, ...[['pdf', 'PDF (vetorial)'], ['svg', 'SVG (vetorial)'], ['png', 'PNG (imagem)'], ['dxf', 'DXF 2000'], ['dxf12', 'DXF R12']].map(([v, l]) => h('option', { value: v }, l)));
+    const fmt = h('select', {}, ...[['pdf', 'PDF (vetorial)'], ['svg', 'SVG (vetorial)'], ['png', 'PNG (imagem)'], ['dxf', 'DXF 2000'], ['dxf12', 'DXF R12'], ['stl', 'STL (sólidos 3D)'], ['obj', 'OBJ (sólidos 3D)']].map(([v, l]) => h('option', { value: v }, l)));
     const area = h('select', {}, h('option', { value: 'ext' }, 'Extensão do desenho'), h('option', { value: 'view' }, 'Vista atual'), h('option', { value: 'sel' }, 'Objetos selecionados'));
     const px = h('input', { type: 'text', class: 'num', value: '3000' });
     const bgS = h('select', {}, h('option', { value: '#ffffff' }, 'Fundo branco'), h('option', { value: app.settings.bg }, 'Fundo da tela'));
     if (!(await this.modal('Exportar', h('div', {}, this.field('Formato', fmt), this.field('Área', area), this.field('Tamanho (px, para PNG/SVG)', px), this.field('Fundo (PNG/SVG)', bgS))))) return;
     const base = app.doc.name.replace(/\.(dxf|dwg)$/i, '');
+    if (fmt.value === 'stl' || fmt.value === 'obj') { setTimeout(() => app.runWith(fmt.value === 'stl' ? 'STLOUT' : 'OBJOUT', area.value === 'sel' ? 'Seleção' : 'Todos'), 0); return; }
     if (fmt.value.startsWith('dxf')) { download(dxfBlob(writeDxf(app.doc, { r12: fmt.value === 'dxf12' })), base + (fmt.value === 'dxf12' ? '_R12' : '') + '.dxf'); return; }
     let bb = area.value === 'view' ? app.viewBB() : area.value === 'sel' && app.sel.size ? [...app.sel].reduce((b, e) => G.bbUnion(b, app.doc.bbox(e)), G.bbEmpty()) : app.doc.extents();
     if (!G.bbValid(bb)) { this.addHist('Nada para exportar.', 'err'); return; }

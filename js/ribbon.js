@@ -1,6 +1,7 @@
 // Interface estilo CAD: barra de título com acesso rápido, faixa de opções (abas/painéis), abas de arquivos,
 // barra de status com ícones, linha de comando flutuante e paleta de camadas
 import { aciHex, trueCss, LINEWEIGHTS, lwLabel } from './colors.js';
+import { PRESETS } from './cam3.js';
 
 export const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -49,6 +50,34 @@ const ICONS = {
   attedit: [['M4 6h16v12H4z', W], ['M7 10h6M7 14h10', B]], attdef: [['M4 6h16v12H4z', W], ['M8 10h8M12 10v6', Y]], wblock: [['M4 4h7v7H4z', W], ['M14 14h6v6h-6z', B], ['M11 11l4 4', Y]],
   matchprop: [['M14 4l6 6-8 8-6-6z', Y], ['M6 12l-3 9 9-3', W]], group: [['M4 4h7v7H4zM13 13h7v7h-7z', W], ['M2 2h20v20H2z', B]], ungroup: [['M4 4h7v7H4zM13 13h7v7h-7z', W], ['M2 2h8M14 22h8', B]], pickstyle: [['M3 3h18v18H3z', B], ['M8 8l8 4-4 1-1 4z', W]],
   area: [['M4 4l16 3-4 13L6 17z', W, 1.6, 'rgba(78,161,255,.3)']],
+  box3: [['M4 8l8-4 8 4v8l-8 4-8-4z', W], ['M4 8l8 4 8-4M12 12v8', B]],
+  cyl3: [['M5 6a7 2.5 0 1 0 14 0a7 2.5 0 1 0-14 0', W], ['M5 6v12a7 2.5 0 0 0 14 0V6', W], ['M5 18a7 2.5 0 0 0 14 0', B]],
+  cone3: [['M12 3L5 18M12 3l7 15', W], ['M5 18a7 2.5 0 0 0 14 0a7 2.5 0 0 0-14 0', B]],
+  sphere3: [['M12 3a9 9 0 1 0 .01 0', W], ['M3 12a9 3 0 0 0 18 0', B], ['M12 3a3 9 0 0 0 0 18', B, 1]],
+  pyr3: [['M12 3L4 17l8 4 8-4z', W], ['M12 3v18', B]],
+  wedge3: [['M4 18h12l4-3H8z', W], ['M4 18V7l4-3v11M4 7l12 11M8 4l12 11', B]],
+  torus3: [['M2 12a10 5 0 1 0 20 0a10 5 0 1 0-20 0', W], ['M8 12a4 1.6 0 1 0 8 0a4 1.6 0 1 0-8 0', B]],
+  extrude3: [['M4 16l8 4 8-4-8-4z', B], ['M4 16V8l8-4 8 4v8M12 12V4', W], ['M12 9V2M10 4l2-2 2 2', Gn, 1.4]],
+  revolve3: [['M12 3v18', '#9aa3ae', 1, ], ['M12 6c4 0 6 2 6 6s-2 6-6 6', W], ['M12 6c-4 0-6 2-6 6s2 6 6 6', B], ['M17 17l1 1.5 1.6-.7', Gn, 1.4]],
+  sweep3: [['M3 18c4 0 5-12 10-12s5 6 8 6', W], ['M3 15a2 3 0 1 0 0 6a2 3 0 1 0 0-6', B]],
+  loft3: [['M4 18a8 2.5 0 1 0 16 0a8 2.5 0 1 0-16 0', B], ['M8 5h8v3H8z', W], ['M4 18L8 6M20 18L16 6', W]],
+  presspull3: [['M4 15l8 4 8-4-8-4z', W], ['M8 13l4 2 4-2-4-2z', B], ['M12 13V3M9.5 5.5L12 3l2.5 2.5', Gn, 1.5]],
+  union3: [['M3 8h10v10H3z', W], ['M9 4h11v11H9z', B, 0, 'rgba(78,161,255,.3)']],
+  subtract3: [['M3 8h10v10H3z', W, 0, 'rgba(217,222,230,.15)'], ['M9 4h11v11H9z', Rd, 1.2]],
+  intersect3: [['M3 8h10v10H3z', W], ['M9 4h11v11H9z', W], ['M9 8h4v7H9z', B, 0, 'rgba(78,161,255,.55)']],
+  slice3: [['M4 8l8-4 8 4v8l-8 4-8-4z', W], ['M2 14L22 7', Rd, 1.6]],
+  move3: [['M12 3v18M3 12h18', W], ['M12 12l6 4', B], ['M12 3l-2 2.5M12 3l2 2.5M21 12l-2.5-2M21 12l-2.5 2', W]],
+  rotate3: [['M5 12a7 3 0 1 0 14 0a7 3 0 1 0-14 0', B], ['M12 3v18', W], ['M18 9.5l1 2.5 2.4-.8', B, 1.3]],
+  mirror3: [['M12 3v18', '#9aa3ae', 1], ['M3 9l6-3v12l-6-3z', W], ['M21 9l-6-3v12l6-3z', B]],
+  massprop3: [['M4 8l8-4 8 4v8l-8 4-8-4z', W], ['M12 12h0', Y, 4]],
+  stl3: [['M5 3h10l4 4v14H5z', W], ['M8 15l4-5 4 5z', B]],
+  orbit3: [['M12 4a8 8 0 1 0 .01 0', W], ['M4 12a8 3 0 0 0 16 0', B], ['M18 14l2-2 1.5 2.5', B, 1.3]],
+  persp3: [['M3 20L9 4h6l6 16z', W], ['M6 12h12', B]],
+  vstyle3: [['M4 8l8-4 8 4v8l-8 4-8-4z', W, 0, 'rgba(78,161,255,.25)'], ['M4 8l8 4 8-4M12 12v8', W]],
+  vtop3: [['M4 4h16v16H4z', W], ['M4 4h16v4H4z', B, 0, 'rgba(78,161,255,.4)']],
+  viso3: [['M4 8l8-4 8 4v8l-8 4-8-4z', W], ['M12 12l-8-4v8l8 4z', B, 0, 'rgba(78,161,255,.35)']],
+  plan3: [['M4 4h16v16H4z', W], ['M8 8h8v8H8z', B]],
+  elev3: [['M4 18h16', W], ['M4 13h16', B], ['M12 18v-5M10 15l2-2 2 2', Gn, 1.3]],
   ai: [['M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z', Pk, 1.6, 'rgba(232,106,214,.3)'], ['M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z', B, 1.2], ['M5 2.5l.6 1.6 1.6.6-1.6.6L5 7l-.6-1.7L2.8 4.7l1.6-.6z', Y, 1]],
   aiplan: [['M3 4h18v16H3z', W], ['M3 12h8M11 4v12M15 12h6M15 12v8', W], ['M17 3l.9 2.1L20 6l-2.1.9L17 9l-.9-2.1L14 6l2.1-.9z', Pk, 1.2]],
   aichat: [['M4 5h16v11H9l-5 4z', W], ['M8 10h0M12 10h0M16 10h0', Pk, 3]],
@@ -131,6 +160,18 @@ export function buildChrome(ui) {
     const list = names.slice(0, 30).map((n) => V(n, () => { ui._preBlock = n; app.runImmediate('INSERT'); }, 'insert'));
     return [{ header: names.length ? 'Blocos neste desenho' : 'Nenhum bloco neste desenho' }, ...list, '-', V('Mais opções...', run('INSERT'), 'insert'), V('Arquivo DWG/DXF como bloco...', run('INSERTFILE'), 'open')];
   };
+  const primV = [V('Caixa', run('BOX'), 'box3'), V('Cilindro', run('CYLINDER'), 'cyl3'), V('Cone', run('CONE'), 'cone3'), V('Esfera', run('SPHERE'), 'sphere3'), V('Pirâmide', run('PYRAMID'), 'pyr3'), V('Cunha', run('WEDGE'), 'wedge3'), V('Toro', run('TORUS'), 'torus3')];
+  const VSV = [['2dwire', 'Estrutura de arame 2D'], ['wire', 'Estrutura de arame'], ['hidden', 'Oculto'], ['realistic', 'Realista'], ['conceptual', 'Conceitual'], ['shaded', 'Sombreado'], ['shadedEdges', 'Sombreado com arestas'], ['gray', 'Tons de cinza'], ['xray', 'Raio X']].map(([k, l]) => V(l, () => app.setStyle(k), 'vstyle3'));
+  const VIEWV = [V('Planta (2D)', () => app.setView3(null), 'plan3'), '-', ...[['top', 'Superior'], ['bottom', 'Inferior'], ['left', 'Esquerda'], ['right', 'Direita'], ['front', 'Frontal'], ['back', 'Posterior']].map(([k, l]) => V(l, () => app.setView3(k, { fit: true }), 'vtop3')), '-', ...[['sw', 'Isométrica SO'], ['se', 'Isométrica SE'], ['ne', 'Isométrica NE'], ['nw', 'Isométrica NO']].map(([k, l]) => V(l, () => app.setView3(k, { fit: true }), 'viso3'))];
+  const mkStyleSel = () => h('select', { class: 'sel', title: 'Estilo visual', onchange: (ev) => app.setStyle(ev.target.value) }, ...[['2dwire', 'Estrutura de arame 2D'], ['wire', 'Estrutura de arame'], ['hidden', 'Oculto'], ['realistic', 'Realista'], ['conceptual', 'Conceitual'], ['shaded', 'Sombreado'], ['shadedEdges', 'Sombreado com arestas'], ['gray', 'Tons de cinza'], ['xray', 'Raio X']].map(([k, l]) => h('option', { value: k }, l)));
+  ui.styleSel = mkStyleSel(); ui.styleSel2 = mkStyleSel();
+  ui.viewSel = h('select', { class: 'sel', title: 'Vista', onchange: (ev) => { const k = ev.target.value; if (k === 'plan') app.setView3(null); else if (k) app.setView3(k, { fit: true }); } }, h('option', { value: '' }, 'Vista personalizada'), h('option', { value: 'plan' }, 'Planta (2D)'), ...[['top', 'Superior'], ['bottom', 'Inferior'], ['left', 'Esquerda'], ['right', 'Direita'], ['front', 'Frontal'], ['back', 'Posterior'], ['sw', 'Isométrica SO'], ['se', 'Isométrica SE'], ['ne', 'Isométrica NE'], ['nw', 'Isométrica NO']].map(([k, l]) => h('option', { value: k }, l)));
+  ui.refresh3d = () => {
+    const v = app.view; const st = v.style || '2dwire';
+    for (const s2 of [ui.styleSel, ui.styleSel2]) s2.value = st;
+    let k = 'plan'; if (v.d3) { k = ''; for (const [n, p] of Object.entries(PRESETS)) if (Math.abs(((v.d3.az - p.az) % 360 + 540) % 360 - 180) < 0.5 && Math.abs(v.d3.el - p.el) < 0.5) k = n; }
+    ui.viewSel.value = k; ui.updateVpLabel && ui.updateVpLabel();
+  };
   const pasteV = [V('Colar', run('PASTECLIP'), 'paste'), V('Copiar com ponto base', run('COPYBASE'), 'copybase')];
 
   // controles de camada / propriedades (reaproveitados por ui.refreshToolbar)
@@ -141,7 +182,28 @@ export function buildChrome(ui) {
   void LINEWEIGHTS; void lwLabel; void aciHex; void trueCss;
 
   const tabs = [
-    { id: 'home', label: 'Início', panels: [
+    { id: 'home3d', label: 'Início', ws: '3d', panels: [
+      { title: 'Modelagem', items: [big('box3', 'Caixa', run('BOX'), primV), big('extrude3', 'Extrudar', run('EXTRUDE')), col(sm('revolve3', 'Revolução', run('REVOLVE')), sm('sweep3', 'Varrer', run('SWEEP')), sm('loft3', 'Transição', run('LOFT'))), big('presspull3', 'Pressionar\npuxar', run('PRESSPULL'))] },
+      { title: 'Edição de sólidos', items: [col(sm('union3', 'União', run('UNION')), sm('subtract3', 'Subtrair', run('SUBTRACT')), sm('intersect3', 'Interseção', run('INTERSECT'))), col(sm('slice3', 'Cortar', run('SLICE')), sm('massprop3', 'Propriedades de massa', run('MASSPROP')), sm('stl3', 'Exportar STL', run('STLOUT')))] },
+      { title: 'Desenhar', items: [col(sm('line', 'Linha', run('LINE')), sm('pline', 'Polilinha', run('PLINE')), sm('circle', 'Círculo', run('CIRCLE'), circleV)), col(sm('rect', 'Retângulo', run('RECTANG'), rectV), sm('arc', 'Arco', run('ARC'), arcV), sm('spline', 'Spline', run('SPLINE')))] },
+      { title: 'Modificar', items: [col(sm('move3', 'Mover 3D', run('3DMOVE')), sm('rotate3', 'Girar 3D', run('3DROTATE')), sm('mirror3', 'Espelhar 3D', run('MIRROR3D'))), col(sm('move', 'Mover', run('MOVE')), sm('copy', 'Copiar', run('COPY')), sm('erase', 'Apagar', run('ERASE')))] },
+      { title: 'Vista', items: [col(el(() => ui.styleSel), el(() => ui.viewSel), sm('orbit3', 'Órbita (Shift+botão do meio)', run('3DORBIT')))] },
+      { title: 'Coordenadas', items: [col(sm('elev3', 'Elevação do plano (Z)', run('ELEV')), sm('plan3', 'Vista de planta', run('PLAN')), sm('layprops', 'Camadas', () => ui.toggleLayerPalette()))] },
+    ] },
+    { id: 'solid', label: 'Sólido', ws: '3d', panels: [
+      { title: 'Primitiva', items: [big('box3', 'Caixa', run('BOX'), primV), col(sm('cyl3', 'Cilindro', run('CYLINDER')), sm('cone3', 'Cone', run('CONE')), sm('sphere3', 'Esfera', run('SPHERE'))), col(sm('pyr3', 'Pirâmide', run('PYRAMID')), sm('wedge3', 'Cunha', run('WEDGE')), sm('torus3', 'Toro', run('TORUS')))] },
+      { title: 'Sólido', items: [big('extrude3', 'Extrudar', run('EXTRUDE')), big('presspull3', 'Pressionar\npuxar', run('PRESSPULL')), col(sm('revolve3', 'Revolução', run('REVOLVE')), sm('sweep3', 'Varrer', run('SWEEP')), sm('loft3', 'Transição', run('LOFT')))] },
+      { title: 'Booleana', items: [big('union3', 'União', run('UNION')), col(sm('subtract3', 'Subtrair', run('SUBTRACT')), sm('intersect3', 'Interseção', run('INTERSECT')))] },
+      { title: 'Edição de sólidos', items: [big('slice3', 'Cortar', run('SLICE')), col(sm('move3', 'Mover 3D', run('3DMOVE')), sm('rotate3', 'Girar 3D', run('3DROTATE')), sm('mirror3', 'Espelhar 3D', run('MIRROR3D')))] },
+      { title: 'Análise e saída', items: [col(sm('massprop3', 'Propriedades de massa', run('MASSPROP')), sm('stl3', 'Exportar STL', run('STLOUT')), sm('stl3', 'Exportar OBJ', run('OBJOUT'))), col(sm('elev3', 'Elevação de objetos 2D', run('SETELEV')), sm('options', 'Suavidade (FACETRES)', run('FACETRES')))] },
+    ] },
+    { id: 'visualize', label: 'Visualizar', ws: '3d', panels: [
+      { title: 'Estilos visuais', items: [big('vstyle3', 'Estilo\nvisual', (ev) => popupMenu(ev.currentTarget, VSV), () => VSV), col(el(() => ui.styleSel2), sm('vstyle3', 'Conceitual', () => app.setStyle('conceptual')), sm('vstyle3', 'Estrutura de arame 2D', () => app.setStyle('2dwire')))] },
+      { title: 'Vistas', items: [big('viso3', 'Vistas', () => app.setView3('sw', { fit: true }), () => VIEWV), col(sm('vtop3', 'Superior', () => app.setView3('top', { fit: true })), sm('vtop3', 'Frontal', () => app.setView3('front', { fit: true })), sm('vtop3', 'Direita', () => app.setView3('right', { fit: true }))), col(sm('viso3', 'Isométrica SO', () => app.setView3('sw', { fit: true })), sm('viso3', 'Isométrica SE', () => app.setView3('se', { fit: true })), sm('plan3', 'Planta (2D)', () => app.setView3(null)))] },
+      { title: 'Navegação', items: [big('orbit3', 'Órbita', run('3DORBIT')), col(sm('zoomext', 'Zoom extensão', () => app.zoomExtents()), sm('persp3', 'Perspectiva', () => { const v = app.view; if (!v.d3) app.setView3('sw', { fit: true }); else { v.d3.persp = !v.d3.persp; app.redraw(); ui.refresh3d && ui.refresh3d(); } }), sm('vstyle3', 'Cubo de navegação', () => { app.settings.viewcube = app.settings.viewcube === false; app.dirty.over = true; }))] },
+      { title: 'Janelas de modelo', items: [big('vports', 'Configuração\nde janelas', () => app.setLayout('four'), vpV)] },
+    ] },
+    { id: 'home', label: 'Início', ws: '2d', panels: [
       { title: 'Desenhar', items: [big('line', 'Linha', run('LINE')), big('pline', 'Polilinha', run('PLINE')), big('circle', 'Círculo', run('CIRCLE'), circleV), big('arc', 'Arco', run('ARC'), arcV), col(icn('rect', 'Retângulo', run('RECTANG')), icn('ellipse', 'Elipse', run('ELLIPSE')), icn('hatch', 'Hachura', run('HATCH'))), col({ kind: 'caret', variants: rectV }, { kind: 'caret', variants: ellV }, { kind: 'caret', variants: hatchV })],
         more: [sm('spline', 'Spline', run('SPLINE')), sm('polygon', 'Polígono', run('POLYGON')), sm('point', 'Ponto', run('POINT')), sm('xline', 'Linha de construção', run('XLINE')), sm('ray', 'Raio', run('RAY')), sm('donut', 'Rosca', run('DONUT')), sm('revcloud', 'Nuvem de revisão', run('REVCLOUD')), sm('wipeout', 'Wipeout', run('WIPEOUT')), sm('boundary', 'Contorno', run('BOUNDARY')), sm('gradient', 'Gradiente', run('GRADIENT')), sm('divide', 'Dividir', run('DIVIDE')), sm('divide', 'Medir (pontos)', run('MEASURE'))] },
       { title: 'Modificar', items: [col(sm('move', 'Mover', run('MOVE')), sm('copy', 'Copiar', run('COPY')), sm('stretch', 'Esticar', run('STRETCH'))), col(sm('rotate', 'Rotacionar', run('ROTATE')), sm('mirror', 'Espelhar', run('MIRROR')), sm('scale', 'Escala', run('SCALE'))), col(sm('trim', 'Aparar', run('TRIM'), trimV), sm('fillet', 'Concordância', run('FILLET'), filletV), sm('array', 'Matriz', run('ARRAYRECT'), arrayV)), col(icn('erase', 'Apagar', run('ERASE')), icn('explode', 'Explodir', run('EXPLODE')), icn('offset', 'Deslocamento (Offset)', run('OFFSET')))],
@@ -228,7 +290,8 @@ export function buildChrome(ui) {
   const tb = document.getElementById('titlebar');
   const appBtn = h('button', { class: 'qat-app', title: 'Menu do aplicativo', onclick: (ev) => appMenu(ev.currentTarget) }, h('span', { class: 'app-mark' }, 'W'), h('span', { class: 'caret' }, '▾'));
   const qat = h('div', { class: 'qat' }, ...[['new', 'Novo (Ctrl+N)', 'NEW'], ['open', 'Abrir (Ctrl+O)', 'OPEN'], ['save', 'Salvar (Ctrl+S)', 'QSAVE'], ['saveas', 'Salvar como', 'SAVEAS'], ['plot', 'Plotar (Ctrl+P)', 'PLOT'], ['undo', 'Desfazer (Ctrl+Z)', 'U'], ['redo', 'Refazer (Ctrl+Y)', 'REDO']].map(([i, t, c]) => h('button', { class: 'qat-b', title: t, html: icon(i, 18), onclick: run(c) })));
-  const ws = h('select', { class: 'ws', title: 'Espaço de trabalho' }, h('option', {}, 'Desenho e anotação'));
+  const ws = h('select', { class: 'ws', title: 'Espaço de trabalho', onchange: (ev) => ui.setWorkspace(ev.target.value) }, h('option', { value: '2d' }, 'Desenho e anotação'), h('option', { value: '3d' }, 'Modelagem 3D'));
+  ui.wsSel = ws;
   ui.titleEl = h('div', { class: 'doctitle' });
   const search = h('input', { class: 'tsearch', placeholder: 'Digite uma palavra-chave ou comando', onkeydown: (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { const v = search.value.trim(); search.value = ''; if (!v) return; const c = app.resolveCmd(v) || Object.values(app.commands).find((x) => (x.desc || '').toLowerCase().includes(v.toLowerCase()))?.name; if (c) app.runImmediate(c); else app.msg(`Nada encontrado para "${v}".`, 'err'); search.blur(); } } });
   tb.append(appBtn, qat, ws, ui.titleEl, h('div', { class: 'tb-right' }, search, h('button', { class: 'qat-b', title: 'Ajuda (F1)', html: icon('help', 18), onclick: run('HELP') })));
@@ -256,7 +319,7 @@ export function buildChrome(ui) {
       wrap.append(panel);
     }
     panelsOf[t.id] = wrap; rib.append(wrap);
-    const tbtn = h('button', { class: 'rtab' + (t.contextual ? ' ctx' : ''), 'data-tab': t.id, onclick: () => select(t.id), ondblclick: () => document.body.classList.toggle('ribbon-min') }, t.label);
+    const tbtn = h('button', { class: 'rtab' + (t.contextual ? ' ctx' : ''), 'data-tab': t.id, 'data-ws': t.ws || '', onclick: () => select(t.id), ondblclick: () => document.body.classList.toggle('ribbon-min') }, t.label);
     if (t.contextual) tbtn.hidden = true;
     tabsEl.append(tbtn);
   }
@@ -267,13 +330,23 @@ export function buildChrome(ui) {
     if (document.body.classList.contains('ribbon-min')) document.body.classList.add('ribbon-peek');
     try { localStorage.setItem('webcad.tab', id); } catch { /* */ }
   }
+  // espaço de trabalho: troca o conjunto de abas (Desenho e anotação / Modelagem 3D)
+  ui.setWorkspace = (w) => {
+    w = w === '3d' ? '3d' : '2d'; app.settings.workspace = w; ws.value = w;
+    for (const b of tabsEl.querySelectorAll('.rtab')) { const tw = b.dataset.ws; if (tw) b.hidden = tw !== w; }
+    const cur = tabsEl.querySelector('.rtab.on'); if (!cur || cur.hidden) select(w === '3d' ? 'home3d' : 'home');
+    try { localStorage.setItem('webcad.ws', w); } catch { /* */ }
+    setTimeout(() => ui.fitRibbon && ui.fitRibbon(), 0);
+  };
   let last = 'home'; try { last = localStorage.getItem('webcad.tab') || 'home'; } catch { /* */ }
   if (last === 'layout') last = 'home';
   select(panelsOf[last] ? last : 'home');
+  let w0 = '2d'; try { w0 = localStorage.getItem('webcad.ws') || '2d'; } catch { /* */ }
+  ui.setWorkspace(w0);
   ui.showLayoutTab = (on) => {
     const b = tabsEl.querySelector('.rtab[data-tab="layout"]'); const was = !b.hidden; b.hidden = !on;
     const cur = tabsEl.querySelector('.rtab.on')?.dataset.tab;
-    if (on && !was) select('layout'); else if (!on && cur === 'layout') select('home');
+    if (on && !was) select('layout'); else if (!on && cur === 'layout') select(app.settings.workspace === '3d' ? 'home3d' : 'home');
     setTimeout(() => ui.fitRibbon && ui.fitRibbon(), 0);
   };
   // recolhe painéis da direita quando a faixa não cabe na largura da janela

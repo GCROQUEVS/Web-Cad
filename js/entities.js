@@ -694,5 +694,5 @@ function structuredCloneLite(v) {
   if (Array.isArray(v)) return v.map((x) => (x && typeof x === 'object' ? structuredCloneLite(x) : x));
   const o = {}; for (const k in v) { const x = v[k]; o[k] = x && typeof x === 'object' ? structuredCloneLite(x) : x; } return o;
 }
-export function invalidate(e) { delete e._bb; delete e._g; delete e._pts; delete e._lay; delete e._prims; }
+export function invalidate(e) { delete e._s3; delete e._bb; delete e._g; delete e._pts; delete e._lay; delete e._prims; }
 export const TYPE_NAMES = { LINE: 'Linha', XLINE: 'Linha de construção', RAY: 'Raio', CIRCLE: 'Círculo', ARC: 'Arco', LWPOLYLINE: 'Polilinha', ELLIPSE: 'Elipse', SPLINE: 'Spline', POINT: 'Ponto', TEXT: 'Texto', MTEXT: 'Texto múltiplo', SOLID: 'Sólido 2D', HATCH: 'Hachura', INSERT: 'Bloco', DIMENSION: 'Cota', LEADER: 'Chamada', IMAGE: 'Imagem', WIPEOUT: 'Wipeout', VIEWPORT: 'Viewport', ATTDEF: 'Def. atributo', '3DFACE': 'Face 3D', TRACE: 'Trace' };

@@ -68,6 +68,16 @@ O arquivo `worker/index.js` (configurado em `wrangler.jsonc`) serve o site e ofe
 
 Sem o secret, os créditos gratuitos ficam desligados e nada é cobrado.
 
+## Modelagem 3D
+
+Escolha **Modelagem 3D** no seletor de espaço de trabalho (barra de título) para ver as abas **Início**, **Sólido** e **Visualizar** com as ferramentas 3D.
+
+- **Navegação:** cubo de navegação (clique em faces, arestas e cantos; arraste para orbitar; casa = vista inicial), **Shift + botão do meio** para orbitar, `3DORBIT`, vistas prontas (superior, frontal, laterais, isométricas), projeção paralela ou em perspectiva, rótulo `[-][Vista][Estilo]` no canto da janela e até 4 janelas com vistas diferentes.
+- **Estilos visuais:** estrutura de arame 2D/3D, oculto, realista, conceitual, sombreado, sombreado com arestas, tons de cinza e raio X (`VSCURRENT`).
+- **Sólidos:** `BOX`, `CYLINDER`, `CONE`, `SPHERE`, `PYRAMID`, `WEDGE`, `TORUS`, `EXTRUDE` (com inclinação, direção ou caminho), `REVOLVE`, `SWEEP`, `LOFT`, `PRESSPULL` (faces de sólidos ou áreas fechadas), `UNION`, `SUBTRACT`, `INTERSECT`, `SLICE`, `3DMOVE`, `3DROTATE`, `MIRROR3D`, `MASSPROP`, `ELEV`, `SETELEV`, `FACETRES`.
+- **Arquivos:** sólidos são salvos no DXF como malha poliface (lida pelos CADs de mesa) e podem ser exportados em **STL** e **OBJ** (`STLOUT`, `OBJOUT` ou Exportar).
+- Os sólidos são malhas trianguladas (operações booleanas com a biblioteca Manifold); sólidos ACIS de arquivos DWG/DXF de outros programas ainda não são lidos.
+
 ## Recursos
 - **Desenho:** LINE, PLINE (com arcos e largura), CIRCLE (centro/raio, diâmetro, 2P, 3P, TTR), ARC (3P, início-centro-fim, início-fim-raio, centro-início-fim), RECTANG, POLYGON, ELLIPSE (inclusive arco elíptico), SPLINE, POINT (com estilo de ponto), XLINE, RAY, DONUT, REVCLOUD, WIPEOUT, TEXT, MTEXT, HATCH (14 padrões + sólido, contorno por ponto interno com ilhas), GRADIENT, BOUNDARY, TABLE (aceita colar do Excel)
 - **Modificação:** MOVE, COPY, ROTATE, SCALE, MIRROR, OFFSET, TRIM/EXTEND, FILLET, CHAMFER, ARRAY (retangular, polar e em caminho), EXPLODE, JOIN, BREAK, BREAKATPOINT, STRETCH, LENGTHEN, ALIGN, MATCHPROP, PEDIT, DIVIDE, MEASURE, DRAWORDER, ERASE

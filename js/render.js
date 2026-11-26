@@ -4,6 +4,7 @@ import { T, textCorners, mtextLayout, cleanText, dispStr, textWidth, FONT, CAP, 
 import { aciCss, trueCss } from './colors.js';
 import { vpMatrix, vpOutline } from './entities.js';
 import { pageSize } from './doc.js';
+import { solidEdges } from './solid.js';
 function toGray(css) {
   let r, g, b; const m = css.match(/rgb\((\d+),(\d+),(\d+)\)/);
   if (m) [r, g, b] = [+m[1], +m[2], +m[3]]; else if (css[0] === '#') { r = parseInt(css.slice(1, 3), 16); g = parseInt(css.slice(3, 5), 16); b = parseInt(css.slice(5, 7), 16); } else return css;
@@ -29,6 +30,7 @@ export class Renderer {
     this.vpFrozen = opts.vpFrozen || null; // camadas congeladas na viewport
     this.plotting = !!opts.plotting; // na plotagem, camadas "não plotar" ficam de fora
     this.gray = !!opts.gray;
+    this.proj3 = opts.proj3 || null; this.ev = opts.ev || null; this.persp = !!opts.persp; this.skipSolids = !!opts.skipSolids;
     this.fill = opts.fill ?? true; this.qtext = !!opts.qtext; this.lockFade = opts.lockFade || 0; this.lwDefault = opts.lwDefault ?? 25; this.lwScale = opts.lwScale ?? 1;
   }
   flush() {
@@ -90,6 +92,10 @@ export class Renderer {
     const h = T[e.type]; if (!h) return;
     if (e.type === 'ATTDEF' && par) return;
     const st = this.resolve(e, par, Tm);
+    if (e.type === '3DSOLID' || (this.proj3 && !par && (this.persp || e.elev))) {
+      if (e.type === '3DSOLID' && this.skipSolids && this.proj3) return;
+      if (this.proj3 && !par) { this.applyStroke(st, Tm); this.drawProjected(e); return; }
+    }
     if (e.type === 'INSERT') return this.drawInsert(e, Tm, st, viewBB);
     if (e.type === 'DIMENSION') {
       const g = h.geom(e, doc);
@@ -112,6 +118,23 @@ export class Renderer {
     }
     if (this.curT !== Tm) { c.setTransform(Tm[0], Tm[1], Tm[2], Tm[3], Tm[4], Tm[5]); this.curT = Tm; }
     h.path(c, e, 1 / G.mScale(Tm));
+    this.pending = true;
+  }
+  // desenho com projeção 3D (vista 3D): arestas de sólidos ou primitivas 2D elevadas/em perspectiva
+  drawProjected(e) {
+    const c = this.ctx, pr = this.proj3;
+    if (this.curT !== 'id') { c.setTransform(1, 0, 0, 1, 0, 0); this.curT = 'id'; }
+    const seg = (a, b) => { if (!a || !b) return; c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); };
+    if (e.type === '3DSOLID') {
+      const v = e.mesh.v, ed = solidEdges(e, this.ev);
+      for (let i = 0; i < ed.length; i += 2) { const a = ed[i] * 3, b = ed[i + 1] * 3; seg(pr(v[a], v[a + 1], v[a + 2]), pr(v[b], v[b + 1], v[b + 2])); }
+    } else {
+      const z = e.elev || 0;
+      for (const q of this.doc.prims(e)) {
+        if (q.k === 'L') seg(pr(q.a.x, q.a.y, z), pr(q.b.x, q.b.y, z));
+        else if (q.k === 'A') { const sw = G.arcSweep(q.sa, q.ea), k = Math.max(6, Math.ceil(sw / G.TAU * 48)); let prev = null; for (let i = 0; i <= k; i++) { const a = q.sa + sw * i / k; const p = pr(q.c.x + Math.cos(a) * q.r, q.c.y + Math.sin(a) * q.r, z); if (i) seg(prev, p); prev = p; } }
+      }
+    }
     this.pending = true;
   }
   drawInsert(e, Tm, st, viewBB) {

@@ -5,8 +5,11 @@ import { T, cloneEnt, textCorners, TYPE_NAMES } from './entities.js';
 import { Renderer, renderDoc, renderLayout } from './render.js';
 import { pageSize } from './doc.js';
 import { vpOutline } from './entities.js';
+import { camera, basis, lerpAng, PRESETS } from './cam3.js';
+import { solidCache, solidEdges, rayMesh } from './solid.js';
 const { P, M, ap, dist, add, sub } = G;
 
+export const GL_STYLES = new Set(['hidden', 'realistic', 'conceptual', 'shaded', 'shadedEdges', 'gray', 'xray']);
 export class Cancel extends Error { constructor() { super('cancel'); } }
 
 export const OSNAP_KINDS = { end: 'Extremidade', mid: 'Ponto médio', cen: 'Centro', qua: 'Quadrante', int: 'Interseção', per: 'Perpendicular', tan: 'Tangente', nea: 'Mais próximo', nod: 'Nó', ins: 'Inserção', ext: 'Extensão' };
@@ -144,7 +147,7 @@ export class App {
     const old = this.vps, act = this.view;
     const oldRect = old[this.ai];
     this.vps = R.map(([x, y, w, h], i) => {
-      let view = old[i] ? old[i].view : { ...act };
+      let view = old[i] ? old[i].view : { ...act, d3: act.d3 ? { ...act.d3 } : undefined };
       if (!keep && old[i] && old[i].w > 1) { const k = Math.min(w / old[i].w, h / old[i].h); view = { ...view, scale: view.scale * (k > 0 ? k : 1) }; }
       return { x, y, w: Math.max(1, w), h: Math.max(1, h), view };
     });
@@ -184,12 +187,43 @@ export class App {
   runWith(cmd, ...inputs) { this.inputQueue = inputs.slice(); this.runImmediate(cmd); }
   redraw() { this.dirty.scene = this.dirty.sel = this.dirty.over = true; }
   // ---------------- vista ----------------
-  w2s(p) { const v = this.vp, w = v.view; return P((p.x - w.cx) * w.scale + v.x + v.w / 2, (w.cy - p.y) * w.scale + v.y + v.h / 2); }
-  s2w(p) { const v = this.vp, w = v.view; return P((p.x - v.x - v.w / 2) / w.scale + w.cx, w.cy - (p.y - v.y - v.h / 2) / w.scale); }
-  devMatrix() { const v = this.vp, w = v.view, s = w.scale * this.dpr; return [s, 0, 0, -s, (v.x + v.w / 2 - w.cx * w.scale) * this.dpr, (v.y + v.h / 2 + w.cy * w.scale) * this.dpr]; }
-  viewBB() { const v = this.vp; const a = this.s2w(P(v.x, v.y + v.h)), b = this.s2w(P(v.x + v.w, v.y)); return { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }; }
+  // ---- 3D: a vista da janela tem view.d3 = {az, el, tz, persp}
+  is3d() { return !!(this.vp.view.d3 && (!this.space || this.space === 'MODEL')); }
+  cam3() { return camera(this.vp, this.vp.view); }
+  // limites 3D do desenho (cache por versão): {minX,minY,maxX,maxY,minZ,maxZ}
+  ext3() {
+    if (this._e3 && this._e3v === this.doc.version) return this._e3;
+    const b = { ...this.doc.extents(true), minZ: 0, maxZ: 0 };
+    for (const e of this.doc.ents.values()) { if (e.type === '3DSOLID' && this.doc.visible(e)) { const c = solidCache(e).bb; b.minZ = Math.min(b.minZ, c[2]); b.maxZ = Math.max(b.maxZ, c[5]); } else if (e.elev) { b.minZ = Math.min(b.minZ, e.elev); b.maxZ = Math.max(b.maxZ, e.elev); } }
+    this._e3v = this.doc.version; return (this._e3 = b);
+  }
+  w2s(p) { if (this.is3d()) { const q = this.cam3().proj(p.x, p.y, p.z || 0); return P(q.x, q.y); } const v = this.vp, w = v.view; return P((p.x - w.cx) * w.scale + v.x + v.w / 2, (w.cy - p.y) * w.scale + v.y + v.h / 2); }
+  s2w(p) {
+    if (this.is3d()) {
+      const c = this.cam3(); const z = this.workZ || 0; let q = c.toPlane(p.x, p.y, z);
+      if (!q || Math.hypot(q.x - c.t[0], q.y - c.t[1]) > c.dist * 60 + 1e6 / c.s) { const R = c.ray(p.x, p.y); const k = c.persp ? c.dist : c.dist * 4; q = { x: R.o[0] + R.d[0] * k, y: R.o[1] + R.d[1] * k }; }
+      return z ? { x: q.x, y: q.y, z } : P(q.x, q.y);
+    }
+    const v = this.vp, w = v.view; return P((p.x - v.x - v.w / 2) / w.scale + w.cx, w.cy - (p.y - v.y - v.h / 2) / w.scale); }
+  devMatrix() { if (this.is3d()) return this.cam3().planeMatrix(0, this.dpr); const v = this.vp, w = v.view, s = w.scale * this.dpr; return [s, 0, 0, -s, (v.x + v.w / 2 - w.cx * w.scale) * this.dpr, (v.y + v.h / 2 + w.cy * w.scale) * this.dpr]; }
+  viewBB() {
+    if (this.is3d()) {
+      const v = this.vp, c = this.cam3(); const pts = [];
+      for (const [x, y] of [[v.x, v.y], [v.x + v.w, v.y], [v.x, v.y + v.h], [v.x + v.w, v.y + v.h], [v.x + v.w / 2, v.y + v.h / 2]]) { const q = c.toPlane(x, y, 0); if (q && Math.hypot(q.x - c.t[0], q.y - c.t[1]) < c.dist * 60 + 1e6 / c.s) pts.push(q); else pts.push(null); }
+      let bb = { ...this.ext3() }; if (!G.bbValid(bb)) bb = { minX: c.t[0] - 1, minY: c.t[1] - 1, maxX: c.t[0] + 1, maxY: c.t[1] + 1 };
+      if (pts.some((q) => !q)) return G.bbUnion(bb, { minX: c.t[0] - 10 / c.s * v.w, minY: c.t[1] - 10 / c.s * v.w, maxX: c.t[0] + 10 / c.s * v.w, maxY: c.t[1] + 10 / c.s * v.w });
+      const r = pts.reduce((b, q) => ({ minX: Math.min(b.minX, q.x), minY: Math.min(b.minY, q.y), maxX: Math.max(b.maxX, q.x), maxY: Math.max(b.maxY, q.y) }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+      // sólidos acima/abaixo do plano podem aparecer fora da janela projetada no plano
+      const pad = Math.max(r.maxX - r.minX, r.maxY - r.minY) * 0.6; return { minX: r.minX - pad, minY: r.minY - pad, maxX: r.maxX + pad, maxY: r.maxY + pad };
+    }
+    const v = this.vp; const a = this.s2w(P(v.x, v.y + v.h)), b = this.s2w(P(v.x + v.w, v.y)); return { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }; }
   pushView() { this.viewStack.push({ ...this.view }); if (this.viewStack.length > 50) this.viewStack.shift(); }
   zoomAt(f, sp) {
+    if (this.is3d()) {
+      const c = this.cam3(); const v = this.view; const k = (1 - 1 / f) / c.s; const dx = (sp.x - c.ox) * k, dy = (c.oy - sp.y) * k;
+      v.cx += c.r[0] * dx + c.u[0] * dy; v.cy += c.r[1] * dx + c.u[1] * dy; v.d3.tz = (v.d3.tz || 0) + c.r[2] * dx + c.u[2] * dy;
+      v.scale = Math.min(1e9, Math.max(1e-9, v.scale * f)); this.redraw(); return;
+    }
     const w = this.s2w(sp);
     this.view.scale = Math.min(1e9, Math.max(1e-9, this.view.scale * f));
     const w2 = this.s2w(sp);
@@ -203,7 +237,54 @@ export class App {
     if (!isFinite(this.view.scale) || this.view.scale <= 0) this.view.scale = 1;
     this.view.cx = (bb.minX + bb.maxX) / 2; this.view.cy = (bb.minY + bb.maxY) / 2; this.redraw();
   }
-  zoomExtents() { const bb = this.doc.extents(); if (G.bbValid(bb)) this.zoomBB(bb); else { this.view = { cx: 50, cy: 50, scale: Math.min(this.vp.w, this.vp.h) / 120 }; this.redraw(); } }
+  zoomExtents() {
+    if (this.is3d()) return this.zoomExtents3();
+    const bb = this.doc.extents(); if (G.bbValid(bb)) this.zoomBB(bb); else { Object.assign(this.view, { cx: 50, cy: 50, scale: Math.min(this.vp.w, this.vp.h) / 120 }); this.redraw(); }
+  }
+  // enquadra tudo na vista 3D (caixa 3D projetada nos eixos da câmera)
+  zoomExtents3(bb3) {
+    const b = bb3 || this.ext3(); const v = this.view;
+    if (!G.bbValid(b)) { Object.assign(v, { cx: 50, cy: 50, scale: Math.min(this.vp.w, this.vp.h) / 120 }); v.d3.tz = 0; this.redraw(); return; }
+    this.pushView();
+    const { r, u } = basis(v.d3.az, v.d3.el, v.d3.roll || 0);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const x of [b.minX, b.maxX]) for (const y of [b.minY, b.maxY]) for (const z of [b.minZ || 0, b.maxZ || 0]) { const X = x * r[0] + y * r[1] + z * r[2], Y = x * u[0] + y * u[1] + z * u[2]; x0 = Math.min(x0, X); x1 = Math.max(x1, X); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y); }
+    const w = Math.max(x1 - x0, 1e-6), h = Math.max(y1 - y0, 1e-6);
+    v.scale = Math.min(this.vp.w / w, this.vp.h / h) * 0.9; if (v.d3.persp) v.scale *= 0.8;
+    const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2, cz = ((b.minZ || 0) + (b.maxZ || 0)) / 2;
+    // centro na tela: desloca o alvo dentro do plano de visão
+    const X = (x0 + x1) / 2, Y = (y0 + y1) / 2; const Xc = cx * r[0] + cy * r[1] + cz * r[2], Yc = cx * u[0] + cy * u[1] + cz * u[2];
+    const k1 = X - Xc, k2 = Y - Yc;
+    v.cx = cx + r[0] * k1 + u[0] * k2; v.cy = cy + r[1] * k1 + u[1] * k2; v.d3.tz = cz + r[2] * k1 + u[2] * k2;
+    this.redraw();
+  }
+  // muda a vista 3D da janela ativa (com animação curta). d = {az, el} ou nome de PRESETS; null = planta 2D
+  setView3(d, { fit = false, ms = 350 } = {}) {
+    const v = this.view; if (this.space && this.space !== 'MODEL') { this.msg('Vistas 3D funcionam no espaço Modelo.', 'err'); return; }
+    if (typeof d === 'string') d = PRESETS[d];
+    if (!d) { if (v.d3 && GL_STYLES.has(v.style)) v.style = '2dwire'; const a = v.d3; if (a) { const t = { az: -90, el: 90 }; this.animate(a, t, ms, () => { delete v.d3; this.redraw(); this.onView3 && this.onView3(); }); } return; }
+    if (!v.d3) v.d3 = { az: -90, el: 90, tz: 0, persp: false };
+    const to = { az: d.az, el: d.el };
+    this.animate(v.d3, to, ms, () => { if (fit) this.zoomExtents3(); this.onView3 && this.onView3(); });
+  }
+  animate(d3, to, ms, done) {
+    const from = { az: d3.az, el: d3.el, roll: d3.roll || 0 }; const t0 = performance.now(); cancelAnimationFrame(this._anim);
+    if (!ms) { d3.az = to.az; d3.el = to.el; d3.roll = 0; this.redraw(); done && done(); return; }
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / ms); const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      d3.az = lerpAng(from.az, to.az, e); d3.el = from.el + (to.el - from.el) * e; d3.roll = from.roll * (1 - e);
+      this.redraw(); this.dirty.over = true;
+      if (k < 1) this._anim = requestAnimationFrame(step); else { d3.az = to.az; d3.el = to.el; d3.roll = 0; done && done(); }
+    };
+    this._anim = requestAnimationFrame(step);
+  }
+  // órbita: arrastar com Shift + botão do meio (ou modo 3DORBIT)
+  orbitBy(dx, dy) {
+    const v = this.view; if (this.space && this.space !== 'MODEL') return;
+    if (!v.d3) v.d3 = { az: -90, el: 90, tz: 0, persp: false };
+    v.d3.az = ((v.d3.az - dx * 0.45) % 360 + 540) % 360 - 180; v.d3.el = Math.max(-90, Math.min(90, v.d3.el + dy * 0.45));
+    this.redraw(); this.dirty.over = true; this.onView3 && this.onView3();
+  }
   zoomPrev() { const v = this.viewStack.pop(); if (v) { this.view = v; this.redraw(); } }
   pxw(px = 1) { return px / this.view.scale; }
   // ---------------- laço de render ----------------
@@ -212,7 +293,7 @@ export class App {
     if (this.doc.version !== this.lastVersion) { this.lastVersion = this.doc.version; this.dirty.scene = this.dirty.sel = true; this.sceneDocDirty = true; this.onDocChange && this.onDocChange(); }
     if (this.dirty.scene) {
       this.dirty.scene = false;
-      const viewOnly = this.settings.blit && !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1 && (this.space || 'MODEL') === 'MODEL';
+      const viewOnly = this.settings.blit && !this.sceneDocDirty && this.backView && this.lastRenderMs > 18 && this.vps.length === 1 && (this.space || 'MODEL') === 'MODEL' && !this.vp.view.d3;
       this.sceneDocDirty = false;
       if (viewOnly) { this.blitScene(); clearTimeout(this._fullT); this._fullT = setTimeout(() => { this.renderScene(); this.dirty.sel = true; }, 150); }
       else { clearTimeout(this._fullT); this.renderScene(); }
@@ -235,6 +316,7 @@ export class App {
     if (!this.cBack || this.cBack.width !== this.cScene.width || this.cBack.height !== this.cScene.height) { this.cBack = document.createElement('canvas'); this.cBack.width = this.cScene.width; this.cBack.height = this.cScene.height; this.ctxBack = this.cBack.getContext('2d'); }
     this.renderTo(this.ctxBack);
     const s = this.ctxScene; s.setTransform(1, 0, 0, 1, 0, 0); s.drawImage(this.cBack, 0, 0);
+    this.renderGL && this.renderGL();
     this.backView = { ...this.view };
   }
   renderTo(c) {
@@ -249,12 +331,32 @@ export class App {
     c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = this.settings.bg; c.fillRect(0, 0, this.cScene.width, this.cScene.height);
     let n = 0;
     this.eachVp(c, () => {
-      if (this.settings.grid) this.drawGrid(c);
-      const r = new Renderer(c, this.doc, { dark: this.isDark(), lwt: this.settings.lwt, dpr: this.dpr, bg: this.settings.bg, lodPx: this.settings.lodPx, ...this.dispOpts() });
+      if (this.settings.grid) { if (this.is3d()) this.drawGrid3(c); else this.drawGrid(c); }
+      const r = new Renderer(c, this.doc, { dark: this.isDark(), lwt: this.settings.lwt, dpr: this.dpr, bg: this.settings.bg, lodPx: this.settings.lodPx, ...this.dispOpts(), ...this.r3opts(true) });
       c.lineCap = 'round'; c.lineJoin = 'round';
       n += renderDoc(r, this.doc, this.devMatrix(), this.viewBB());
     });
     this.lastRenderMs = performance.now() - t0; this.lastRenderCount = n;
+  }
+  // opções do renderizador 2D para a janela ativa em vista 3D
+  r3opts(scene) {
+    if (!this.is3d()) return {};
+    const c = this.cam3(), d = this.dpr; const st = this.vp.view.style || '2dwire';
+    return { proj3: (x, y, z) => { const q = c.proj(x, y, z); return q.behind ? null : { x: q.x * d, y: q.y * d }; }, ev: c.e, persp: c.persp, skipSolids: !!scene && GL_STYLES.has(st) };
+  }
+  drawGrid3(c) {
+    const cam = this.cam3(), d = this.dpr; let sp = this.settings.gridSpacing;
+    while (sp * cam.s < 10) sp *= 5;
+    const n = 60; const cx = Math.round(cam.t[0] / sp) * sp, cy = Math.round(cam.t[1] / sp) * sp;
+    const C = this.settings.colors; const minor = C.gridMinor !== 'auto' ? C.gridMinor : this.isDark() ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)', major = C.gridMajor !== 'auto' ? C.gridMajor : this.isDark() ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.14)';
+    c.setTransform(1, 0, 0, 1, 0, 0); c.lineWidth = 1;
+    const seg = (x1, y1, x2, y2) => { const a = cam.proj(x1, y1, 0), b = cam.proj(x2, y2, 0); if (a.behind || b.behind) return; c.moveTo(a.x * d, a.y * d); c.lineTo(b.x * d, b.y * d); };
+    for (const [mod, col] of [[false, minor], [true, major]]) {
+      c.beginPath(); c.strokeStyle = col;
+      for (let i = -n; i <= n; i++) { const isMaj = Math.round((cx + i * sp) / sp) % 5 === 0; if (isMaj !== mod) continue; seg(cx + i * sp, cy - n * sp, cx + i * sp, cy + n * sp); }
+      for (let i = -n; i <= n; i++) { const isMaj = Math.round((cy + i * sp) / sp) % 5 === 0; if (isMaj !== mod) continue; seg(cx - n * sp, cy + i * sp, cx + n * sp, cy + i * sp); }
+      c.stroke();
+    }
   }
   drawGrid(c) {
     let sp = this.settings.gridSpacing; while (sp * this.view.scale < 8) sp *= 5;
@@ -276,7 +378,7 @@ export class App {
     const c = this.ctxSel; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, this.cSel.width, this.cSel.height);
     if (!this.sel.size) return;
     this.eachVp(c, () => {
-    const r = new Renderer(c, this.doc, { dark: this.isDark(), dpr: this.dpr, mono: this.settings.colors.selection, forcedWidth: 2 * this.dpr, lodPx: 0 });
+    const r = new Renderer(c, this.doc, { dark: this.isDark(), dpr: this.dpr, mono: this.settings.colors.selection, forcedWidth: 2 * this.dpr, lodPx: 0, ...this.r3opts() });
     c.globalAlpha = 0.9;
     const Tm = this.devMatrix(), vb = this.viewBB();
     c.setLineDash([]);
@@ -306,14 +408,14 @@ export class App {
     // pré-visualização
     this.eachVp(c, () => {
       if (this.preview && this.preview.length) {
-        const r = new Renderer(c, this.doc, { dark, dpr: d, lodPx: 0 });
+        const r = new Renderer(c, this.doc, { dark, dpr: d, lodPx: 0, ...this.r3opts() });
         r.ctx.beginPath(); r.key = null;
         const Tm = this.devMatrix(), vb = this.viewBB();
         for (const e of this.preview) { this.doc.defaults(e); r.drawEnt(e, Tm, null, vb); }
         r.flush();
       }
       if (this.hover && !this.selWin) {
-        const r = new Renderer(c, this.doc, { dark, dpr: d, mono: dark ? this.settings.colors.hover : '#0050c0', forcedWidth: 2.5 * d, lodPx: 0 });
+        const r = new Renderer(c, this.doc, { dark, dpr: d, mono: dark ? this.settings.colors.hover : '#0050c0', forcedWidth: 2.5 * d, lodPx: 0, ...this.r3opts() });
         r.ctx.beginPath(); r.key = null; r.drawEnt(this.hover, this.devMatrix(), null, this.viewBB()); r.flush();
       }
     });
@@ -371,7 +473,13 @@ export class App {
       const showCross = this.pending ? this.pending.kind !== 'select' && this.pending.kind !== 'entity' : true;
       const L = this.settings.crosshairSize >= 100 ? 99999 : Math.max(8, Math.min(this.W, this.H) * this.settings.crosshairSize / 200);
       const sx = Math.round(s.x * d) + 0.5, sy = Math.round(s.y * d) + 0.5;
-      if (showCross) { c.moveTo(sx - L * d, sy); c.lineTo(sx - pick * d, sy); c.moveTo(sx + pick * d, sy); c.lineTo(sx + L * d, sy); c.moveTo(sx, sy - L * d); c.lineTo(sx, sy - pick * d); c.moveTo(sx, sy + pick * d); c.lineTo(sx, sy + L * d); }
+      if (showCross && this.is3d()) {
+        // cursor 3D: eixos X (vermelho) e Y (verde) projetados pelo ponto + Z (azul) curto
+        const cam = this.cam3(), p = this.cursor, z = p.z || 0, len = Math.min(L, 70) / cam.s;
+        const ln = (dx, dy, dz, col, k = 1) => { const a = cam.proj(p.x - dx * len * k, p.y - dy * len * k, z - dz * len * k), b = cam.proj(p.x + dx * len * k, p.y + dy * len * k, z + dz * len * k); if (a.behind || b.behind) return; c.stroke(); c.beginPath(); c.strokeStyle = col; c.moveTo(a.x * d, a.y * d); c.lineTo(b.x * d, b.y * d); c.stroke(); c.beginPath(); };
+        ln(1, 0, 0, dark ? '#ff7070' : '#c00000'); ln(0, 1, 0, dark ? '#70ff70' : '#008000'); ln(0, 0, 1, dark ? '#7090ff' : '#0030c0', 0.15);
+        c.strokeStyle = cc && cc !== 'auto' ? cc : fg;
+      } else if (showCross) { c.moveTo(sx - L * d, sy); c.lineTo(sx - pick * d, sy); c.moveTo(sx + pick * d, sy); c.lineTo(sx + L * d, sy); c.moveTo(sx, sy - L * d); c.lineTo(sx, sy - pick * d); c.moveTo(sx, sy + pick * d); c.lineTo(sx, sy + L * d); }
       if (!this.pending || this.pending.kind === 'select' || this.pending.kind === 'entity') c.rect(sx - pick * d, sy - pick * d, pick * 2 * d, pick * 2 * d);
       c.stroke();
       if (this.settings.showAperture && this.pending && showCross && (this.settings.osnap || this.oneShot)) { const ap_ = this.settings.aperture; c.beginPath(); c.strokeStyle = this.settings.colors.snap; c.globalAlpha = 0.7; c.rect(sx - ap_ * d, sy - ap_ * d, 2 * ap_ * d, 2 * ap_ * d); c.stroke(); c.globalAlpha = 1; }
@@ -383,9 +491,26 @@ export class App {
         let info = '';
         if (this.trackLabel) info = this.trackLabel;
         else if (base && this.pending.kind === 'point') info = `${G.fmt(dist(base, this.cursor), 3)} < ${G.fmt(G.deg(G.normAng(G.angle(base, this.cursor))), 1)}°`;
-        else info = `${G.fmt(this.cursor.x, 3)}, ${G.fmt(this.cursor.y, 3)}`;
+        else info = `${G.fmt(this.cursor.x, 3)}, ${G.fmt(this.cursor.y, 3)}` + (this.cursor.z ? `, ${G.fmt(this.cursor.z, 3)}` : '');
         this.drawTip(c, s.x + 18, s.y + 22, (typed ? typed : info), txt);
       }
+    }
+    c.restore();
+    this.drawUcs3(c);
+    this.onOverlay && this.onOverlay();
+  }
+  // ícone de eixos 3D no canto inferior esquerdo da janela ativa
+  drawUcs3(c) {
+    const el = this.wrap && this.wrap.querySelector('.ucs'); const on = this.is3d();
+    if (el) el.style.display = on || (this.space && this.space !== 'MODEL') ? 'none' : '';
+    if (!on) return;
+    const d = this.dpr, v = this.vp, { r, u } = basis(this.view.d3.az, this.view.d3.el, this.view.d3.roll || 0);
+    const ox = (v.x + 34) * d, oy = (v.y + v.h - 34) * d, L = 24 * d;
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.lineWidth = 2 * d; c.font = `bold ${10 * d}px Segoe UI, Arial`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (const [ax, col, lab] of [[[1, 0, 0], '#e05555', 'X'], [[0, 1, 0], '#4cc35a', 'Y'], [[0, 0, 1], '#4f86ff', 'Z']]) {
+      const x = ax[0] * r[0] + ax[1] * r[1] + ax[2] * r[2], y = ax[0] * u[0] + ax[1] * u[1] + ax[2] * u[2];
+      c.strokeStyle = col; c.fillStyle = col; c.beginPath(); c.moveTo(ox, oy); c.lineTo(ox + x * L, oy - y * L); c.stroke();
+      c.fillText(lab, ox + x * (L + 8 * d), oy - y * (L + 8 * d));
     }
     c.restore();
   }
@@ -446,7 +571,8 @@ export class App {
     if (kinds.size) {
       const ap_ = this.pxw(st.aperture);
       const bb = { minX: raw.x - ap_, minY: raw.y - ap_, maxX: raw.x + ap_, maxY: raw.y + ap_ };
-      let cands = this.doc.query(bb).filter((e) => this.doc.visible(e) && (st.osnapHatch || e.type !== 'HATCH'));
+      const v3 = this.is3d();
+      let cands = this.doc.query(bb).filter((e) => this.doc.visible(e) && (st.osnapHatch || e.type !== 'HATCH') && !(v3 && (e.type === '3DSOLID' || e.elev)));
       if (this.hotGrip) cands = cands.filter((e) => !this.hotGrip.ents.includes(e));
       if (cands.length > 60) cands = cands.slice(-60);
       // geometria ainda em construção no comando (ex.: vértices da polilinha sendo desenhada)
@@ -482,6 +608,16 @@ export class App {
       }
       if (!best && kinds.has('nea')) for (const q of near) consider(G.primClosest(q, raw), 'nea', 0.5);
       if (!best && st.grid && st.snap) { /* abaixo */ }
+      // vista 3D: snaps de sólidos (e entidades elevadas) medidos na tela
+      if (v3) {
+        const cs = this.cursorScreen, apx = st.aperture, sc = this.view.scale; let b3 = null;
+        for (const e of this.doc.ents.values()) {
+          if (!(e.type === '3DSOLID' || e.elev) || !this.doc.visible(e)) continue;
+          const h = T[e.type]; if (!h.snaps) continue;
+          for (const sn of h.snaps(e, this.doc)) { if (!kinds.has(sn.k)) continue; const p = e.type === '3DSOLID' ? sn.p : { x: sn.p.x, y: sn.p.y, z: e.elev }; const q = this.w2s(p); const dd = Math.hypot(q.x - cs.x, q.y - cs.y); if (dd <= apx && (!b3 || dd < b3.d)) b3 = { p, k: sn.k, d: dd }; }
+        }
+        if (b3 && (!best || b3.d < best.d * sc)) best = { p: b3.p, k: b3.k, d: b3.d / sc };
+      }
     }
     if (best) return { p: best.p, snap: { p: best.p, k: best.k } };
     let p = raw;
@@ -533,7 +669,46 @@ export class App {
     return { p, snap: null };
   }
   // ---------------- seleção ----------------
+  // distância na tela (px) de uma entidade 3D (sólido ou elevada) ao cursor
+  screenDist3(e, sp) {
+    const c = this.cam3(); let best = Infinity;
+    const segd = (a, b) => { if (a.behind || b.behind) return; const d = G.distSeg(sp, a, b); if (d < best) best = d; };
+    if (e.type === '3DSOLID') {
+      const v = e.mesh.v, ed = solidEdges(e, c.e);
+      for (let i = 0; i < ed.length; i += 2) { const a = ed[i] * 3, b = ed[i + 1] * 3; segd(c.proj(v[a], v[a + 1], v[a + 2]), c.proj(v[b], v[b + 1], v[b + 2])); }
+      if (best > this.settings.pickbox && GL_STYLES.has(this.view.style)) { const R = c.ray(sp.x, sp.y); if (rayMesh(e, R.o, R.d)) best = this.settings.pickbox * 0.8; }
+    } else {
+      const z = e.elev || 0;
+      for (const q of this.doc.prims(e)) {
+        if (q.k === 'L') segd(c.proj(q.a.x, q.a.y, z), c.proj(q.b.x, q.b.y, z));
+        else if (q.k === 'A') { const sw = G.arcSweep(q.sa, q.ea), k = Math.max(6, Math.ceil(sw / G.TAU * 32)); let pv = null; for (let i = 0; i <= k; i++) { const a = q.sa + sw * i / k; const p = c.proj(q.c.x + Math.cos(a) * q.r, q.c.y + Math.sin(a) * q.r, z); if (pv) segd(pv, p); pv = p; } }
+      }
+    }
+    return best;
+  }
+  // sólido sob o cursor (raio), para snaps em faces e comandos como PRESSPULL
+  rayPick(sp) {
+    if (!this.is3d()) return null; const c = this.cam3(), R = c.ray(sp.x, sp.y); let best = null;
+    for (const e of this.doc.ents.values()) { if (e.type !== '3DSOLID' || !this.doc.visible(e)) continue; const h = rayMesh(e, R.o, R.d); if (h && (!best || h.t < best.hit.t)) best = { e, hit: h }; }
+    return best;
+  }
   pick(sp, filter) {
+    if (this.is3d()) {
+      const tolPx = this.settings.pickbox; const w = this.s2w(sp), tol = this.pxw(tolPx), sc = this.view.scale;
+      let best = null, bd = Infinity;
+      const persp = this.cam3().persp;
+      const bb = { minX: w.x - tol, minY: w.y - tol, maxX: w.x + tol, maxY: w.y + tol };
+      if (!persp) for (const e of this.doc.query(bb)) {
+        if (e.type === '3DSOLID' || e.elev || !this.doc.visible(e) || (filter && !filter(e))) continue;
+        const d = this.entDist(e, w, tol) * sc; if (d <= tolPx && d < bd) { bd = d; best = e; }
+      }
+      for (const e of this.doc.ents.values()) {
+        if (!(e.type === '3DSOLID' || e.elev || persp) || !this.doc.visible(e) || (filter && !filter(e))) continue;
+        if (T[e.type]?.infinite) continue;
+        const d = this.screenDist3(e, sp); if (d <= tolPx && d < bd) { bd = d; best = e; }
+      }
+      return best;
+    }
     const w = this.s2w(sp), tol = this.pxw(this.settings.pickbox);
     const bb = { minX: w.x - tol, minY: w.y - tol, maxX: w.x + tol, maxY: w.y + tol };
     const cands = this.doc.query(bb);
@@ -556,6 +731,22 @@ export class App {
     return d;
   }
   windowSelect(a, b, crossing) {
+    if (this.is3d()) {
+      const A = this.w2s(a), B = this.w2s(b); const r = { minX: Math.min(A.x, B.x), minY: Math.min(A.y, B.y), maxX: Math.max(A.x, B.x), maxY: Math.max(A.y, B.y) };
+      const c = this.cam3(); const out = [];
+      for (const e of this.doc.ents.values()) {
+        if (!this.doc.visible(e) || T[e.type]?.infinite) continue;
+        let corners;
+        if (e.type === '3DSOLID') { const q = solidCache(e).bb; corners = []; for (const x of [q[0], q[3]]) for (const y of [q[1], q[4]]) for (const z of [q[2], q[5]]) corners.push([x, y, z]); }
+        else { const q = this.doc.bbox(e); if (!G.bbValid(q)) continue; const z = e.elev || 0; corners = [[q.minX, q.minY, z], [q.maxX, q.minY, z], [q.minX, q.maxY, z], [q.maxX, q.maxY, z]]; }
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, bad = false;
+        for (const [x, y, z] of corners) { const p = c.proj(x, y, z); if (p.behind) bad = true; x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+        if (bad) continue;
+        const sb = { minX: x0, minY: y0, maxX: x1, maxY: y1 };
+        if (G.bbInside(sb, r)) out.push(e); else if (crossing && G.bbOverlap(sb, r)) out.push(e);
+      }
+      return out;
+    }
     const r = { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
     const out = [];
     for (const e of this.doc.query(r)) {
@@ -601,18 +792,24 @@ export class App {
       if (this.dirty.move || !this.cursorScreen || this.cursorScreen.x !== sp.x || this.cursorScreen.y !== sp.y) { this.dirty.move = false; this.updateCursor(sp); }
       if (this.msvp && ev.button === 0) { const vp = this.vpAtPaper(this.paperPt(sp)); if (vp && vp !== this.msvp) { this.msvp = vp; this._msv = null; this.redraw(); this.updateCursor(sp); this.onSpace && this.onSpace(); return; } }
       if (this.vps.length > 1) { const vi = this.vpAt(sp); if (vi !== this.ai) { this.ai = vi; this.redraw(); this.updateCursor(sp); if (ev.button !== 1) return; } }
+      if ((ev.button === 1 && ev.shiftKey) || (ev.button === 0 && this.orbitMode)) { ev.preventDefault(); panning = { orbit: true, sp, last: sp }; el.style.cursor = 'move'; return; }
       if (ev.button === 1 || (ev.button === 0 && this.panMode)) {
         ev.preventDefault();
         const now = performance.now();
         if (ev.button === 1 && now - lastMid < 350) { this.zoomExtents(); lastMid = 0; return; }
-        lastMid = now; panning = { sp, cx: this.view.cx, cy: this.view.cy }; el.style.cursor = 'grabbing'; return;
+        lastMid = now; panning = { sp, cx: this.view.cx, cy: this.view.cy, tz: this.view.d3 ? this.view.d3.tz || 0 : 0 }; el.style.cursor = 'grabbing'; return;
       }
       if (ev.button === 2) { this.onRightClick(sp, ev); return; }
       if (ev.button === 0) this.onLeftDown(sp, ev);
     });
     el.addEventListener('pointermove', (ev) => {
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
-      if (panning) {
+      if (panning && panning.orbit) { this.orbitBy(sp.x - panning.last.x, sp.y - panning.last.y); panning.last = sp; }
+      else if (panning && this.is3d()) {
+        const c = this.cam3(); const dx = (sp.x - panning.sp.x) / c.s, dy = (sp.y - panning.sp.y) / c.s;
+        this.view.cx = panning.cx - c.r[0] * dx + c.u[0] * dy; this.view.cy = panning.cy - c.r[1] * dx + c.u[1] * dy; this.view.d3.tz = panning.tz - c.r[2] * dx + c.u[2] * dy;
+        this.redraw();
+      } else if (panning) {
         this.view.cx = panning.cx - (sp.x - panning.sp.x) / this.view.scale;
         this.view.cy = panning.cy + (sp.y - panning.sp.y) / this.view.scale;
         this.redraw();
@@ -621,7 +818,7 @@ export class App {
     });
     el.addEventListener('pointerup', (ev) => {
       const r = el.getBoundingClientRect(); const sp = P(ev.clientX - r.left, ev.clientY - r.top);
-      if (panning) { panning = null; el.style.cursor = this.panMode ? 'grab' : 'none'; return; }
+      if (panning) { panning = null; el.style.cursor = this.panMode ? 'grab' : this.orbitMode ? 'move' : 'none'; return; }
       if (ev.button === 0) this.onLeftUp(sp, ev);
     });
     el.addEventListener('dblclick', (ev) => {
@@ -641,7 +838,10 @@ export class App {
   }
   updateCursor(sp, ev) {
     this.cursorScreen = sp;
-    const raw = this.s2w(sp); this.rawCursor = raw;
+    let raw = this.s2w(sp);
+    // vista 3D: o cursor "pousa" na face do sólido sob ele (como a UCS dinâmica)
+    if (this.is3d() && this.pending && (this.pending.kind === 'point' || this.pending.kind === 'dist') && !(this.pending.opts && this.pending.opts.noFace)) { const h = this.rayPick(sp); if (h) raw = { x: h.hit.p[0], y: h.hit.p[1], z: h.hit.p[2], face: h }; }
+    this.rawCursor = raw;
     const r = this.computeSnap(raw);
     this.cursor = r.p; this.snap = r.snap;
     // aquisição de pontos para rastreamento (pausa sobre snap)
@@ -813,6 +1013,7 @@ export class App {
     if (this.hotGrip) { this.cancelGrip(); return; }
     if (this.selWin) { this.selWin = null; this.dirty.over = true; return; }
     if (this.panMode) { this.panMode = false; this.cOver.style.cursor = 'none'; }
+    if (this.orbitMode) { this.orbitMode = false; this.cOver.style.cursor = 'none'; this.msg('Órbita encerrada.', 'dim'); }
     if (this.pending) { const p = this.pending; this.pending = null; this.preview = []; p.reject(new Cancel()); return; }
     this.oneShot = null; this.trackPts = []; this.measure = null;
     this.clearSel(); this.cmdInput.value = ''; this.dirty.over = true;
@@ -949,6 +1150,7 @@ export class App {
     const o = pd.opts;
     if (pd.kind === 'point') { this.resolvePending(pt); return; }
     if (pd.kind === 'dist') {
+      if (o.distFn) { this.resolvePending(o.distFn(pt, this.cursorScreen)); return; }
       if (o.base) { this.resolvePending(dist(o.base, pt)); return; }
       const self = this; const first = pt;
       const prompt = pd.prompt; const res = pd.resolve, rej = pd.reject;
@@ -973,6 +1175,7 @@ export class App {
   async getSelection(prompt = 'Selecione objetos:', opts = {}) {
     if (this.sel.size && !opts.fresh && this.settings.pickfirst) { const s = [...this.sel].filter((e) => this.selectable(e)); this.prevSel = s; this.clearSel(); return s; }
     const r = await this.ask('select', prompt, opts);
+    if (typeof r === 'string') return r;
     const list = r.filter((e) => this.doc.ents.has(e.id));
     this.clearSel();
     return list;
