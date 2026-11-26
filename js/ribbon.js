@@ -120,7 +120,7 @@ export function buildChrome(ui) {
   const arrayV = [V('Matriz retangular', run('ARRAYRECT'), 'array'), V('Matriz em caminho', run('ARRAYPATH'), 'arraypath'), V('Matriz polar', run('ARRAYPOLAR'), 'arraypolar')];
   const textV = [V('Texto múltiplo', run('MTEXT'), 'mtext'), V('Texto de linha única', run('TEXT'), 'text')];
   const dimV = [V('Linear', run('DIMLINEAR'), 'dimlin'), V('Alinhada', run('DIMALIGNED'), 'dimali'), V('Angular', run('DIMANGULAR'), 'dimang'), V('Comprimento do arco', run('DIMARC'), 'dimarc'), V('Raio', run('DIMRADIUS'), 'dimrad'), V('Diâmetro', run('DIMDIAMETER'), 'dimdia'), V('Coordenada', run('DIMORDINATE'), 'dimord')];
-  const measV = [V('Distância', runW('MEASUREGEOM', 'Distância'), 'measure'), V('Raio', runW('MEASUREGEOM', 'Raio'), 'dimrad'), V('Ângulo', runW('MEASUREGEOM', 'Ângulo'), 'dimang'), V('Área', runW('MEASUREGEOM', 'Área'), 'area')];
+  const measV = [V('Distância', runW('MEASUREGEOM', 'Distância'), 'measure'), V('Raio', runW('MEASUREGEOM', 'Raio'), 'dimrad'), V('Ângulo', runW('MEASUREGEOM', 'Ângulo'), 'dimang'), V('Área', runW('MEASUREGEOM', 'Área'), 'area'), V('Rápido (passar o mouse)', runW('MEASUREGEOM', 'Medição rápida'), 'measure')];
   const vpV = [V('Única', () => app.setLayout('single'), 'vports'), V('Duas: verticais', () => app.setLayout('v2'), 'vports'), V('Duas: horizontais', () => app.setLayout('h2'), 'vports'), V('Três', () => app.setLayout('three'), 'vports'), V('Quatro', () => app.setLayout('four'), 'vports')];
   const insertV = () => {
     const names = [...app.doc.blocks.keys()].filter((n) => !n.startsWith('*'));

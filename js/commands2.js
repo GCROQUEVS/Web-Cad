@@ -188,19 +188,105 @@ export function registerMore(app, ui) {
   }, 'Selecionar semelhantes', { noRepeat: true });
 
   // ---------- MEDIR ----------
+  // MEDIR: já começa pedindo pontos (com snap); opções para raio, ângulo, área e modo rápido (passar o mouse)
+  const lab = (p, q) => ({ p: G.mid(p, q), text: f(dist(p, q)) });
+  const segMeasure = (pts) => { const segs = []; for (let i = 1; i < pts.length; i++) segs.push([pts[i - 1], pts[i]]); return { segs, marks: pts.slice(), labels: segs.map(([a, b]) => lab(a, b)) }; };
   R('MEASUREGEOM', ['MEA', 'MEDIRGEOM'], async () => {
-    const k = await app.getKeyword('Opção [Distância/Raio/Ângulo/Área] <Distância>:', ['Distância', 'Raio', 'Ângulo', 'Área'], 'Distância');
-    if (k === 'Raio') { const s = await app.getEntity('Selecione arco ou círculo:', { filter: (e) => e.type === 'ARC' || e.type === 'CIRCLE' }); if (s) msg(`Raio = ${f(s.e.r)},  Diâmetro = ${f(s.e.r * 2)}`); return; }
-    if (k === 'Área') return app.commands.AREA.fn(app);
-    if (k === 'Ângulo') {
-      const s1 = await app.getEntity('Selecione arco ou primeira linha:', { filter: (e) => e.type === 'ARC' || e.type === 'LINE' }); if (!s1) return;
-      if (s1.e.type === 'ARC') { msg(`Ângulo = ${G.fmt(G.deg(G.arcSweep(s1.e.sa, s1.e.ea)), 4)}°`); return; }
-      const s2 = await app.getEntity('Selecione a segunda linha:', { filter: (e) => e.type === 'LINE' && e !== s1.e }); if (!s2) return;
-      let a = Math.abs(angle(s1.e.p1, s1.e.p2) - angle(s2.e.p1, s2.e.p2)) % Math.PI; if (a > Math.PI / 2) a = Math.PI - a;
-      msg(`Ângulo = ${G.fmt(G.deg(a), 4)}°  (suplementar ${G.fmt(180 - G.deg(a), 4)}°)`); return;
+    const KW = ['Distância', 'Raio', 'Ângulo', 'Área', 'Medição rápida', 'Sair'];
+    for (;;) {
+      const r = await app.getPoint('Primeiro ponto ou [Distância/Raio/Ângulo/Área/Medição rápida/Sair]:', { keywords: KW });
+      if (!r || r === 'Sair') return;
+      if (r === 'Distância') { const p = await app.getPoint('Primeiro ponto:'); if (p) await measureDist(p); continue; }
+      if (r === 'Raio') { await measureRadius(); continue; }
+      if (r === 'Ângulo') { await measureAngle(); continue; }
+      if (r === 'Área') { await measureArea(); continue; }
+      if (r === 'Medição rápida') { await measureQuick(); continue; }
+      await measureDist(r);
     }
-    return app.commands.DIST.fn(app);
-  }, 'Medir geometria (distância, raio, ângulo, área)');
+  }, 'Medir: distância entre pontos, raio, ângulo, área e modo rápido');
+  async function measureDist(p1) {
+    const pts = [p1]; let multi = false;
+    for (;;) {
+      const last = pts[pts.length - 1];
+      const p = await app.getPoint(pts.length === 1 && !multi ? 'Segundo ponto ou [Vários pontos]:' : 'Próximo ponto (Enter termina):', { base: last, keywords: pts.length === 1 && !multi ? ['Vários pontos'] : [], rubber: false,
+        snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }],
+        preview: (c) => { const m = segMeasure([...pts, c]); if (multi && pts.length > 1) { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); m.labels.push({ p: c, text: 'Total: ' + f(t + dist(last, c)), dy: 14 }); } app.measure = m; return []; } });
+      if (p === 'Vários pontos') { multi = true; continue; }
+      if (!p) break;
+      pts.push(p); if (!multi) break;
+    }
+    if (pts.length < 2) { app.measure = null; return; }
+    app.measure = segMeasure(pts);
+    if (pts.length === 2) { const [a, b] = pts; msg(`Distância = ${f(dist(a, b))},  Ângulo no plano XY = ${G.fmt(G.deg(G.normAng(angle(a, b))), 4)}°,  Delta X = ${f(b.x - a.x)},  Delta Y = ${f(b.y - a.y)}`); }
+    else { let t = 0; for (let i = 1; i < pts.length; i++) t += dist(pts[i - 1], pts[i]); msg(`Distância total = ${f(t)} (${pts.length - 1} segmentos)`); app.measure.labels.push({ p: pts[pts.length - 1], text: 'Total: ' + f(t), dy: 14 }); }
+  }
+  async function measureRadius() {
+    const s = await app.getEntity('Selecione arco ou círculo:', { filter: (e) => e.type === 'ARC' || e.type === 'CIRCLE' || (e.type === 'LWPOLYLINE' && e.pts.some((q) => q.b)) }); if (!s) return;
+    let c0 = s.e.c, r0 = s.e.r;
+    if (s.e.type === 'LWPOLYLINE') { const pr = doc().prims(s.e).filter((q) => q.k === 'A').sort((a, b) => G.primDist(a, s.p) - G.primDist(b, s.p))[0]; if (!pr) return; c0 = pr.c; r0 = pr.r; }
+    const p = polar(c0, angle(c0, s.p), r0);
+    app.measure = { segs: [[c0, p]], marks: [c0, p], labels: [{ p: G.mid(c0, p), text: `R ${f(r0)}  ·  Ø ${f(r0 * 2)}` }] };
+    msg(`Raio = ${f(r0)},  Diâmetro = ${f(r0 * 2)}`);
+  }
+  async function measureAngle() {
+    const s1 = await app.getEntity('Selecione arco, linha ou <especificar vértice>:', { filter: (e) => e.type === 'ARC' || e.type === 'LINE' || e.type === 'CIRCLE' });
+    let c0, p1, p2;
+    if (!s1) { c0 = await app.getPoint('Vértice do ângulo:'); if (!c0) return; p1 = await app.getPoint('Primeiro ponto:', { base: c0 }); if (!p1) return; p2 = await app.getPoint('Segundo ponto:', { base: c0, preview: (q) => { app.measure = { segs: [[c0, p1], [c0, q]], marks: [c0], labels: [{ p: c0, text: G.fmt(G.deg(Math.abs(G.normAng(angle(c0, q) - angle(c0, p1) + Math.PI) - Math.PI)), 3) + '°' }] }; return []; } }); if (!p2) return; }
+    else if (s1.e.type === 'ARC') { c0 = s1.e.c; p1 = polar(c0, s1.e.sa, s1.e.r); p2 = polar(c0, s1.e.ea, s1.e.r); }
+    else if (s1.e.type === 'CIRCLE') { c0 = s1.e.c; p1 = s1.p; p2 = await app.getPoint('Segundo ponto no círculo:', { base: c0 }); if (!p2) return; }
+    else {
+      const s2 = await app.getEntity('Selecione a segunda linha:', { filter: (e) => e.type === 'LINE' && e !== s1.e }); if (!s2) return;
+      const x = G.intLL(s1.e.p1, s1.e.p2, s2.e.p1, s2.e.p2)[0]; if (!x) { msg('As linhas são paralelas (ângulo 0°).'); return; }
+      c0 = x.p; const far = (e, pk) => { const fp = G.closestOnLine(pk, e.p1, e.p2); return dist(fp, c0) > 1e-9 ? fp : (dist(e.p1, c0) > dist(e.p2, c0) ? e.p1 : e.p2); };
+      p1 = far(s1.e, s1.p); p2 = far(s2.e, s2.p);
+    }
+    let a = Math.abs(G.normAng(angle(c0, p2) - angle(c0, p1) + Math.PI) - Math.PI);
+    if (s1 && s1.e.type === 'ARC') a = G.arcSweep(s1.e.sa, s1.e.ea);
+    app.measure = { segs: [[c0, p1], [c0, p2]], marks: [c0], labels: [{ p: c0, text: G.fmt(G.deg(a), 4) + '°' }] };
+    msg(`Ângulo = ${G.fmt(G.deg(a), 4)}°  (replementar ${G.fmt(360 - G.deg(a), 4)}°)`);
+  }
+  async function measureArea() {
+    let total = 0;
+    for (;;) {
+      const a = await app.getPoint('Primeiro canto ou [Objeto] (Enter sai):', { keywords: ['Objeto'] }); if (!a) return;
+      if (a === 'Objeto') {
+        const s = await app.getEntity('Selecione um objeto fechado:', { filter: (e) => T[e.type].area }); if (!s) continue;
+        const ar = Math.abs(T[s.e.type].area(s.e)), per = T[s.e.type].length ? T[s.e.type].length(s.e) : 0; total += ar;
+        const bb = doc().bbox(s.e); app.measure = { segs: [], labels: [{ p: P((bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2), text: `Área ${f(ar)}  ·  Perímetro ${f(per)}` }] };
+        msg(`Área = ${f(ar)},  Perímetro = ${f(per)}`); continue;
+      }
+      const pts = [a];
+      const show = (list) => { const per = list.reduce((sum, q, i) => sum + (i ? dist(list[i - 1], q) : 0), 0) + (list.length > 2 ? dist(list[list.length - 1], list[0]) : 0); const ar = list.length > 2 ? Math.abs(G.polyArea(list)) : 0; const cx = list.reduce((s2, q) => s2 + q.x, 0) / list.length, cy = list.reduce((s2, q) => s2 + q.y, 0) / list.length; app.measure = { area: true, pts: list, segs: list.map((q, i) => [q, list[(i + 1) % list.length]]).slice(0, list.length > 2 ? list.length : list.length - 1), marks: list, labels: [{ p: P(cx, cy), text: `Área ${f(ar)}  ·  Perímetro ${f(per)}` }] }; return { ar, per }; };
+      for (;;) { const p = await app.getPoint('Próximo ponto (Enter calcula):', { base: pts[pts.length - 1], rubber: false, snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }], preview: (c) => { show([...pts, c]); return []; } }); if (!p) break; pts.push(p); }
+      if (pts.length < 3) { app.measure = null; continue; }
+      const r = show(pts); total += r.ar; msg(`Área = ${f(r.ar)},  Perímetro = ${f(r.per)}`);
+    }
+  }
+  // modo rápido: ao mover o cursor, mostra distâncias até a geometria mais próxima em cada direção e a medida do objeto sob o cursor
+  async function measureQuick() {
+    msg('Modo rápido: mova o cursor sobre o desenho. Clique ou Enter para sair.', 'dim');
+    const quick = (c) => {
+      const vb = app.viewBB(); const span = Math.max(vb.maxX - vb.minX, vb.maxY - vb.minY) * 2;
+      let cands = doc().query(vb).filter((e) => doc().visible(e) && !['TEXT', 'MTEXT', 'HATCH', 'DIMENSION', 'POINT'].includes(e.type));
+      if (cands.length > 4000) cands = cands.slice(-4000);
+      const prims = []; for (const e of cands) for (const q of doc().prims(e)) prims.push(q);
+      const hits = [];
+      for (const d of [P(1, 0), P(-1, 0), P(0, 1), P(0, -1)]) {
+        const ray = { k: 'L', a: c, b: add(c, G.mul(d, span)) }; let best = null;
+        for (const q of prims) for (const p of G.primInts(ray, q)) { const t = G.dot(sub(p, c), d); if (t > app.pxw(0.5) && (!best || t < best.t)) best = { t, p }; }
+        hits.push(best ? best.p : null);
+      }
+      const segs = [], labels = [], marks = [];
+      const pair = (i, j) => { const a = hits[i], b = hits[j]; if (a && b) { segs.push([a, b]); labels.push({ ...lab(a, b), dx: i === 0 ? 6 : -40, dy: i === 0 ? -26 : 8 }); marks.push(a, b); } else for (const h of [a, b]) if (h) { segs.push([c, h]); labels.push({ ...lab(c, h) }); marks.push(h); } };
+      pair(0, 1); pair(2, 3);
+      const under = app.pick(app.w2s(c));
+      if (under) { const inf = T[under.type].info ? T[under.type].info(under, doc()) : {}; const k = ['Comprimento', 'Raio', 'Área'].find((x) => inf[x] != null); if (k) labels.push({ p: c, text: `${k}: ${f(inf[k])}`, dx: 16, dy: 18 }); }
+      app.measure = { segs, labels, marks };
+      return [];
+    };
+    await app.getPoint('Mova o cursor (clique ou Enter para sair):', { rubber: false, preview: quick, noSnap: true });
+    app.measure = null;
+  }
 
   // ---------- MATRIZ EM CAMINHO ----------
   R('ARRAYPATH', ['MATRIZCAMINHO'], async () => {

@@ -475,21 +475,35 @@ export function registerCommands(app, ui) {
     msg('Objeto não pode ser estendido.', 'err'); return false;
   }
   const trimmable = (e) => ['LINE', 'ARC', 'CIRCLE', 'LWPOLYLINE', 'ELLIPSE', 'SPLINE'].includes(e.type);
-  R('TRIM', ['TR', 'APARAR'], async () => {
-    const edges = await edgesPrompt('corte');
-    msg('Shift+clique estende em vez de aparar.', 'dim');
+  // modo rápido (como no AutoCAD atual): todos os objetos já são arestas; clique apara/estende direto.
+  // Objetos pré-selecionados viram as arestas. Opções: escolher arestas, cerca (arrastar uma linha).
+  async function quickTrim(extend) {
+    let edges = app.sel.size ? [...app.sel] : null; if (edges) app.clearSel();
+    msg(`Modo rápido: ${edges ? 'objetos pré-selecionados são as arestas' : 'todos os objetos servem de aresta'}. Shift+clique ${extend ? 'apara' : 'estende'}.`, 'dim');
+    const act = (e, p, inv) => ((extend !== inv) ? extendEnt(e, p, edges) : trimEnt(e, p, edges));
     for (;;) {
-      const s = await app.getEntity('Selecione o objeto a aparar (Enter sai):', { filter: trimmable }); if (!s) return;
-      if (app._shift) extendEnt(s.e, s.p, edges); else trimEnt(s.e, s.p, edges);
+      const s = await app.getEntity(`Selecione o objeto a ${extend ? 'estender' : 'aparar'} ou [Arestas/Cerca] (Enter sai):`, { filter: trimmable, keywords: ['Arestas', 'Cerca'] });
+      if (!s) return;
+      if (s === 'Arestas') { const sel = await app.getSelection(`Selecione as arestas de ${extend ? 'limite' : 'corte'} (Enter = todos os objetos):`, { fresh: true }); edges = sel.length ? sel : null; continue; }
+      if (s === 'Cerca') {
+        const a = await app.getPoint('Primeiro ponto da cerca:'); if (!a) continue;
+        const b = await app.getPoint('Ponto final da cerca:', { base: a }); if (!b) continue;
+        const fence = { k: 'L', a, b }; const bb = G.bbAdd(G.bbAdd(G.bbEmpty(), a), b);
+        const hits = [];
+        for (const e of doc().query(bb)) { if (!doc().visible(e) || !trimmable(e) || !app.selectable(e)) continue; for (const q of doc().prims(e)) for (const p of G.primInts(fence, q)) hits.push(p); }
+        let n = 0;
+        for (const p of hits) {
+          const tol = app.pxw(1) + 1e-9;
+          const e = doc().query({ minX: p.x - tol, minY: p.y - tol, maxX: p.x + tol, maxY: p.y + tol }).find((x) => doc().visible(x) && trimmable(x) && doc().prims(x).some((q) => G.primDist(q, p) <= tol));
+          if (e && act(e, p, app._shift)) n++;
+        }
+        msg(`${n} objeto(s) ${extend ? 'estendido(s)' : 'aparado(s)'} pela cerca.`, 'dim'); continue;
+      }
+      if (!act(s.e, s.p, app._shift) && extend) msg('Nenhuma aresta limite encontrada.', 'dim');
     }
-  }, 'Aparar');
-  R('EXTEND', ['EX', 'ESTENDER'], async () => {
-    const edges = await edgesPrompt('limite');
-    for (;;) {
-      const s = await app.getEntity('Selecione o objeto a estender (Enter sai):', { filter: trimmable }); if (!s) return;
-      if (app._shift) trimEnt(s.e, s.p, edges); else if (!extendEnt(s.e, s.p, edges)) msg('Nenhuma aresta limite encontrada.', 'dim');
-    }
-  }, 'Estender');
+  }
+  R('TRIM', ['TR', 'APARAR'], () => quickTrim(false), 'Aparar (modo rápido)');
+  R('EXTEND', ['EX', 'ESTENDER'], () => quickTrim(true), 'Estender (modo rápido)');
 
   function lineCorner(s1, s2, r, chamfer) {
     const e1 = s1.e, e2 = s2.e;

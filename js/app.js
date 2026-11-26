@@ -359,6 +359,8 @@ export class App {
     }
     // pontos adquiridos
     for (const tp of this.trackPts) { const s = this.w2s(tp.p); c.strokeStyle = this.settings.colors.track; c.lineWidth = 1.5 * d; c.beginPath(); c.moveTo((s.x - 5) * d, s.y * d); c.lineTo((s.x + 5) * d, s.y * d); c.moveTo(s.x * d, (s.y - 5) * d); c.lineTo(s.x * d, (s.y + 5) * d); c.stroke(); }
+    // medição (MEASUREGEOM): segmentos, rótulos e área com tamanho fixo na tela
+    if (this.measure) this.drawMeasure(c);
     // marcador de osnap
     if (this.snap && this.settings.snapMarker) this.drawSnapMarker(c, this.w2s(this.snap.p), this.snap.k);
     // cursor
@@ -386,6 +388,18 @@ export class App {
       }
     }
     c.restore();
+  }
+  drawMeasure(c) {
+    const m = this.measure, d = this.dpr, col = '#2fc4ff';
+    c.setTransform(1, 0, 0, 1, 0, 0); c.setLineDash([]);
+    if (m.area && m.pts.length >= 3) {
+      c.beginPath(); m.pts.forEach((p, i) => { const s = this.w2s(p); if (i) c.lineTo(s.x * d, s.y * d); else c.moveTo(s.x * d, s.y * d); }); c.closePath();
+      c.globalAlpha = 0.18; c.fillStyle = col; c.fill(); c.globalAlpha = 1;
+    }
+    c.strokeStyle = col; c.lineWidth = 2 * d;
+    for (const [p, q] of m.segs || []) { const a = this.w2s(p), b = this.w2s(q); c.beginPath(); c.moveTo(a.x * d, a.y * d); c.lineTo(b.x * d, b.y * d); c.stroke(); }
+    c.fillStyle = col; for (const p of m.marks || []) { const s = this.w2s(p); c.fillRect(s.x * d - 3 * d, s.y * d - 3 * d, 6 * d, 6 * d); }
+    for (const L of m.labels || []) { const s = this.w2s(L.p); this.drawTip(c, s.x + (L.dx || 6), s.y + (L.dy || -26), L.text); }
   }
   drawTip(c, x, y, text, sub) {
     const d = this.dpr; c.font = `${12 * d}px Segoe UI, Arial`; c.textBaseline = 'middle';
@@ -425,6 +439,7 @@ export class App {
     const wantPoint = pd && (pd.kind === 'point' || pd.kind === 'dist' || pd.kind === 'angle' || (pd.kind === 'number' && pd.opts.base)) || this.hotGrip;
     this.track = null; this.tracks = []; this.trackLabel = '';
     if (!wantPoint) return { p: raw, snap: null };
+    if (pd && pd.opts && pd.opts.noSnap) return { p: raw, snap: null };
     const base = this.hotGrip ? this.hotGrip.p : pd.opts && pd.opts.base;
     const kinds = this.oneShot ? new Set([this.oneShot]) : (st.osnap ? st.osnaps : new Set());
     let best = null;
@@ -796,7 +811,7 @@ export class App {
     if (this.selWin) { this.selWin = null; this.dirty.over = true; return; }
     if (this.panMode) { this.panMode = false; this.cOver.style.cursor = 'none'; }
     if (this.pending) { const p = this.pending; this.pending = null; this.preview = []; p.reject(new Cancel()); return; }
-    this.oneShot = null; this.trackPts = [];
+    this.oneShot = null; this.trackPts = []; this.measure = null;
     this.clearSel(); this.cmdInput.value = ''; this.dirty.over = true;
   }
   // ---------------- linha de comando ----------------
@@ -863,7 +878,7 @@ export class App {
   matchKeyword(t, kws) {
     const N = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
     const u = N(t);
-    const EN = { Fechar: 'Close', Desfazer: 'Undo', Arco: 'Arc', Linha: 'Line', Largura: 'Width', Centro: 'Center', Fim: 'End', 'Diâmetro': 'Diameter', Raio: 'Radius', Copiar: 'Copy', 'Referência': 'Reference', Sim: 'Yes', 'Não': 'No', 'Através': 'Through', Filete: 'Fillet', 'Dimensões': 'Dimensions', Aresta: 'Edge', Texto: 'Text', Horizontal: 'Horizontal', Vertical: 'Vertical', Rotacionado: 'Rotated', 'Ângulo': 'Angle', 'Extensão': 'Extents', Janela: 'Window', Anterior: 'Previous', Tudo: 'All', Objeto: 'Object', Polilinha: 'Polyline', 'Distância': 'Distance', Deslocamento: 'Displacement', Matriz: 'Array', Sair: 'Exit', Escala: 'Scale', 'Rotação': 'Rotate', Retangular: 'Rectangular', Polar: 'Polar', Abrir: 'Open', Juntar: 'Join', Inverter: 'Reverse', Decurvar: 'Decurve', Frente: 'Front', 'Trás': 'Back', Justificar: 'Justify', Delta: 'Delta', Total: 'Total', Hor: 'Hor', Ver: 'Ver', 'Âng': 'Ang' };
+    const EN = { Fechar: 'Close', Desfazer: 'Undo', Arco: 'Arc', Linha: 'Line', Largura: 'Width', Centro: 'Center', Fim: 'End', 'Diâmetro': 'Diameter', Raio: 'Radius', Copiar: 'Copy', 'Referência': 'Reference', Sim: 'Yes', 'Não': 'No', 'Através': 'Through', Filete: 'Fillet', 'Dimensões': 'Dimensions', Aresta: 'Edge', Texto: 'Text', Horizontal: 'Horizontal', Vertical: 'Vertical', Rotacionado: 'Rotated', 'Ângulo': 'Angle', 'Extensão': 'Extents', Janela: 'Window', Anterior: 'Previous', Tudo: 'All', Objeto: 'Object', Polilinha: 'Polyline', 'Distância': 'Distance', Deslocamento: 'Displacement', Matriz: 'Array', Sair: 'Exit', Escala: 'Scale', 'Rotação': 'Rotate', Retangular: 'Rectangular', Polar: 'Polar', Abrir: 'Open', Juntar: 'Join', Inverter: 'Reverse', Decurvar: 'Decurve', Frente: 'Front', 'Trás': 'Back', Justificar: 'Justify', Delta: 'Delta', Total: 'Total', Hor: 'Hor', Ver: 'Ver', 'Âng': 'Ang', 'Medição rápida': 'Quick', Arestas: 'Edges', Cerca: 'Fence', 'Vários pontos': 'Multiple' };
     const S = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     for (const k of kws) { const keys = [N(k), ...(S(k).match(/[A-Z0-9]+/g) || []).slice(0, 1)]; if (keys.includes(u)) return k; }
     for (const k of kws) if (N(k).startsWith(u)) return k;
@@ -968,6 +983,7 @@ export class App {
     if (c.transparent && this.cmdRunning) { await c.fn(this); return; }
     if (this.cmdRunning) { if (this.pending) { const p = this.pending; this.pending = null; p.reject(new Cancel()); } await this.cmdRunning.catch(() => {}); }
     this.echoCmd && this.echoCmd(name);
+    this.measure = null;
     if (!c.noRepeat) this.lastCmd = name;
     this.hover = null; this.dirty.sel = true;
     if (!c.noTx) this.doc.begin(name);
