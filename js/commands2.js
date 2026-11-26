@@ -226,7 +226,7 @@ export function registerMore(app, ui) {
     if (a === 'Polilinha') { const s = await app.getEntity('Selecione uma polilinha fechada:', { filter: (e) => e.type === 'LWPOLYLINE' && e.closed }); if (!s) return; pts = s.e.pts.map((p) => ({ x: p.x, y: p.y, b: 0 })); }
     else {
       pts.push(a);
-      for (;;) { const p = await app.getPoint('Próximo ponto (Enter fecha):', { base: pts[pts.length - 1], preview: (c) => [app.temp({ type: 'LWPOLYLINE', closed: true, pts: [...pts, c].map((q) => ({ ...q, b: 0 })) })] }); if (!p) break; pts.push(p); }
+      for (;;) { const p = await app.getPoint('Próximo ponto (Enter fecha):', { base: pts[pts.length - 1], snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }], preview: (c) => [app.temp({ type: 'LWPOLYLINE', closed: true, pts: [...pts, c].map((q) => ({ ...q, b: 0 })) })] }); if (!p) break; pts.push(p); }
       if (pts.length < 3) return; pts = pts.map((q) => ({ x: q.x, y: q.y, b: 0 }));
     }
     app.addEnt({ type: 'WIPEOUT', pts });

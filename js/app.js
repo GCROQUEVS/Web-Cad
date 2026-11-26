@@ -434,6 +434,8 @@ export class App {
       let cands = this.doc.query(bb).filter((e) => this.doc.visible(e) && (st.osnapHatch || e.type !== 'HATCH'));
       if (this.hotGrip) cands = cands.filter((e) => !this.hotGrip.ents.includes(e));
       if (cands.length > 60) cands = cands.slice(-60);
+      // geometria ainda em construção no comando (ex.: vértices da polilinha sendo desenhada)
+      const se = pd && pd.opts && pd.opts.snapEnts; if (se) { const extra = typeof se === 'function' ? se() : se; for (const x of extra || []) { this.doc.defaults(x); delete x._prims; cands.push(x); } }
       const consider = (p, k, pri = 0) => { const dd = dist(p, raw); if (dd <= ap_ && (!best || dd + pri * ap_ < best.d)) best = { p, k, d: dd + pri * ap_ }; };
       const prims = [];
       for (const e of cands) {

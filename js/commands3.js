@@ -122,7 +122,7 @@ export function registerLayout(app, ui) {
     }
     if (k === 'Poligonal') {
       const pts = [await app.getPoint('Ponto inicial:')]; if (!pts[0]) return;
-      for (;;) { const p = await app.getPoint('Próximo ponto (Enter fecha):', { base: pts[pts.length - 1], preview: (c) => [app.temp({ type: 'LWPOLYLINE', closed: true, pts: [...pts, c].map((q) => ({ ...q, b: 0 })) })] }); if (!p) break; pts.push(p); }
+      for (;;) { const p = await app.getPoint('Próximo ponto (Enter fecha):', { base: pts[pts.length - 1], snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }], preview: (c) => [app.temp({ type: 'LWPOLYLINE', closed: true, pts: [...pts, c].map((q) => ({ ...q, b: 0 })) })] }); if (!p) break; pts.push(p); }
       if (pts.length < 3) return; add(clipVp(pts)); return;
     }
     if (k === '2' || k === '3' || k === '4') {
@@ -174,7 +174,7 @@ export function registerLayout(app, ui) {
     if (k && k.e) { const e = k.e; pts = e.type === 'CIRCLE' ? G.arcPts(e.c, e.r, 0, G.TAU - 1e-9).slice(0, -1) : e.type === 'LWPOLYLINE' ? loopToPts(e.pts, true) : T.ELLIPSE.pts(e).slice(0, -1); doc().remove(e); }
     else {
       pts = [await app.getPoint('Ponto inicial do recorte:')]; if (!pts[0]) return;
-      for (;;) { const p = await app.getPoint('Próximo ponto (Enter fecha):', { base: pts[pts.length - 1], preview: (c) => [app.temp({ type: 'LWPOLYLINE', closed: true, pts: [...pts, c].map((q) => ({ ...q, b: 0 })) })] }); if (!p) break; pts.push(p); }
+      for (;;) { const p = await app.getPoint('Próximo ponto (Enter fecha):', { base: pts[pts.length - 1], snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }], preview: (c) => [app.temp({ type: 'LWPOLYLINE', closed: true, pts: [...pts, c].map((q) => ({ ...q, b: 0 })) })] }); if (!p) break; pts.push(p); }
       if (pts.length < 3) return;
     }
     doc().modify(vp, (x) => { const bb = pts.reduce((b, q) => G.bbAdd(b, q), G.bbEmpty()); const nc = P((bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2); x.vc = G.add(x.vc, G.mul(G.sub(nc, x.c), 1 / x.vs)); x.c = nc; x.w = bb.maxX - bb.minX; x.h = bb.maxY - bb.minY; x.clip = pts.map((q) => P(q.x, q.y)); });

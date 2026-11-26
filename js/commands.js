@@ -41,8 +41,10 @@ export function registerCommands(app, ui) {
     for (;;) {
       const kws = arc ? ['Linha', 'Fechar', 'Desfazer', 'Largura'] : ['Arco', 'Fechar', 'Desfazer', 'Largura'];
       const lp = P(lastPt().x, lastPt().y);
-      const p = await app.getPoint(`Próximo ponto ou [${kws.join('/')}]:`, { base: lp, keywords: kws, rubber: false, preview: (c) => [build({ p: c, b: arc ? bulgeFor(lp, c) : 0 })] });
+      const p = await app.getPoint(`Próximo ponto ou [${kws.join('/')}]:`, { base: lp, keywords: kws, rubber: false, preview: (c) => [build({ p: c, b: arc ? bulgeFor(lp, c) : 0 })], snapEnts: () => [build()] });
       if (!p) break;
+      // clicar de volta no ponto inicial fecha a polilinha
+      if (typeof p === 'object' && pts.length >= 3 && G.eq(p, pts[0], 1e-9)) { if (arc) pts[pts.length - 1].b = bulgeFor(lp, pts[0]); app.addEnt({ type: 'LWPOLYLINE', pts, closed: true, width }); return; }
       if (p === 'Arco') { arc = true; continue; } if (p === 'Linha') { arc = false; continue; }
       if (p === 'Largura') { const w = await app.getDist(`Largura <${f(width)}>:`, { default: width, base: lp }); if (w != null) width = w; continue; }
       if (p === 'Desfazer') { if (pts.length > 1) { pts.pop(); pts[pts.length - 1].b = 0; tan = null; } continue; }
@@ -196,7 +198,7 @@ export function registerCommands(app, ui) {
     const p0 = await app.getPoint('Primeiro ponto:'); if (!p0) return; pts.push(p0);
     for (;;) {
       const kws = pts.length > 2 ? ['Fechar', 'Desfazer'] : ['Desfazer'];
-      const p = await app.getPoint(`Próximo ponto ou [${kws.join('/')}]:`, { base: pts[pts.length - 1], keywords: kws, rubber: false, preview: (c) => [app.temp({ type: 'SPLINE', fit: [...pts, c], deg: 3 })] });
+      const p = await app.getPoint(`Próximo ponto ou [${kws.join('/')}]:`, { base: pts[pts.length - 1], keywords: kws, rubber: false, preview: (c) => [app.temp({ type: 'SPLINE', fit: [...pts, c], deg: 3 })], snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }] });
       if (!p) break; if (p === 'Desfazer') { if (pts.length > 1) pts.pop(); continue; } if (p === 'Fechar') { closed = true; break; }
       pts.push(p);
     }
@@ -878,7 +880,7 @@ export function registerCommands(app, ui) {
       const h = T[s.e.type]; msg(`Área = ${f(Math.abs(h.area ? h.area(s.e) : 0))},  Perímetro/Comprimento = ${f(h.length ? h.length(s.e) : 0)}`); return;
     }
     pts.push(a);
-    for (;;) { const p = await app.getPoint('Próximo ponto (Enter calcula):', { base: pts[pts.length - 1], preview: (c) => [app.temp({ type: 'HATCH', solid: true, pattern: 'SOLID', loops: [[...pts, c].map((q) => ({ ...q, b: 0 }))], color: 4 })] }); if (!p) break; pts.push(p); }
+    for (;;) { const p = await app.getPoint('Próximo ponto (Enter calcula):', { base: pts[pts.length - 1], snapEnts: () => [{ type: 'LWPOLYLINE', closed: false, pts: pts.map((q) => ({ ...q, b: 0 })) }], preview: (c) => [app.temp({ type: 'HATCH', solid: true, pattern: 'SOLID', loops: [[...pts, c].map((q) => ({ ...q, b: 0 }))], color: 4 })] }); if (!p) break; pts.push(p); }
     if (pts.length < 3) return;
     let per = 0; for (let i = 0; i < pts.length; i++) per += dist(pts[i], pts[(i + 1) % pts.length]);
     msg(`Área = ${f(Math.abs(G.polyArea(pts)))},  Perímetro = ${f(per)}`);
