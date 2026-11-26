@@ -790,10 +790,13 @@ export class App {
       if (k === 'Delete' && !this.pending && !(this.cmdInput.value)) { ev.preventDefault(); if (this.sel.size) this.run('ERASE'); return; }
       if (this.hotGrip && (k === ' ' || k === 'Enter') && !this.cmdInput.value) { ev.preventDefault(); this.hotGrip.mode = (this.hotGrip.mode + 1) % 5; this.msg(`** ${this.gripModes()[this.hotGrip.mode]} ** Especifique o ponto:`, 'prompt'); this.updateGripPreview(); this.dirty.over = true; return; }
       if (k === 'Enter' || (k === ' ' && !(this.pending && this.pending.kind === 'string' && this.pending.opts.spaces))) {
-        ev.preventDefault(); const v = this.cmdInput.value; this.cmdInput.value = ''; this.onInputChange && this.onInputChange('');
+        ev.preventDefault(); const v = this.cmdInput.value;
+        const pick = !this.pending && !this.hotGrip && v.trim() && this.autoPick ? this.autoPick(v) : null;
+        this.cmdInput.value = ''; this.onInputChange && this.onInputChange('');
         if (this.hotGrip && v) { const p = this.parsePoint(v, this.hotGrip.p); if (p) this.finishGrip(p); return; }
-        this.submit(v); return;
+        this.submit(pick || v); return;
       }
+      if ((k === 'ArrowUp' || k === 'ArrowDown') && this.autoNav && this.autoNav(k, ev)) return;
       if (k === 'ArrowUp' || k === 'ArrowDown') { this.onHistKey && this.onHistKey(k, ev); return; }
       if (tgt !== this.cmdInput && (k.length === 1 || k === 'Dead') && !ev.altKey) { this.cmdInput.focus(); }
     });

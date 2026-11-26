@@ -114,6 +114,18 @@ export class UI {
     };
     app.onHistKey = (k, ev) => this.histKey(k, ev);
     app.onInputChange = () => this.updateAuto();
+    // lista de sugestões da linha de comando: Enter/Espaço ativa a destacada, ↑/↓ muda o destaque
+    app.autoPick = (v) => {
+      const list = this.autoList || []; if (!list.length) return null;
+      const typed = v.trim().toUpperCase();
+      if (this.autoIdx > 0 || !app.resolveCmd(typed)) return list[this.autoIdx] || list[0];
+      return null;
+    };
+    app.autoNav = (k, ev) => {
+      if (app.pending || !this.autoList || !this.autoList.length || this.autoEl.style.display === 'none') return false;
+      ev.preventDefault(); const n = this.autoList.length;
+      this.autoIdx = (this.autoIdx + (k === 'ArrowDown' ? 1 : -1) + n) % n; this.markAuto(); return true;
+    };
     this.bindDrop();
     this.refreshToolbar(); this.refreshStatus(); this.refreshProps(); this.updateTitle();
     window.addEventListener('beforeunload', (ev) => { if (app.doc.dirty) { this.autosave(); ev.preventDefault(); ev.returnValue = ''; } });
@@ -219,12 +231,15 @@ export class UI {
     this.autoEl.innerHTML = ''; this.autoList = [];
     if (!v || this.app.pending) { this.autoEl.style.display = 'none'; return; }
     const all = [...Object.keys(this.app.commands), ...Object.keys(this.app.aliases)];
-    const list = [...new Set(all.filter((n) => n.startsWith(v)).sort((a, b) => a.length - b.length))].slice(0, 8);
-    this.autoList = list;
+    const pre = all.filter((n) => n.startsWith(v)).sort((a, b) => a.length - b.length);
+    const mid = v.length >= 3 ? all.filter((n) => !n.startsWith(v) && n.includes(v)).sort((a, b) => a.length - b.length) : [];
+    const list = [...new Set([...pre, ...mid])].slice(0, 8);
+    this.autoList = list; this.autoIdx = 0;
     if (!list.length) { this.autoEl.style.display = 'none'; return; }
     for (const n of list) { const full = this.app.resolveCmd(n); this.autoEl.append(h('div', { class: 'ai', onmousedown: (ev) => { ev.preventDefault(); this.app.cmdInput.value = ''; this.autoEl.style.display = 'none'; this.app.run(n); } }, h('b', {}, n), full !== n ? ` → ${full}` : '', h('span', { class: 'desc' }, ' ' + (this.app.commands[full]?.desc || '')))); }
-    this.autoEl.style.display = 'block';
+    this.autoEl.style.display = 'block'; this.markAuto();
   }
+  markAuto() { [...this.autoEl.children].forEach((el, i) => el.classList.toggle('on', i === this.autoIdx)); }
   addHist(t, cls = '') {
     if (t == null || t === '') return;
     const d = h('div', { class: 'hl ' + cls }); d.textContent = t; this.histEl.append(d);
@@ -252,6 +267,7 @@ export class UI {
     const list = this.cmdHist; if (!list.length) return; ev.preventDefault();
     if (k === 'ArrowUp') this.histIdx = Math.min(list.length - 1, this.histIdx + 1); else this.histIdx = Math.max(-1, this.histIdx - 1);
     inp.value = this.histIdx >= 0 ? list[list.length - 1 - this.histIdx] : '';
+    this.autoList = []; this.autoEl.style.display = 'none';
   }
   // ---------- propriedades ----------
   buildProps() {
